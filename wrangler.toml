@@ -5,6 +5,11 @@ compatibility_date = "2025-09-19"
 [build]
 command = "cargo install -q worker-build && worker-build --release"
 
+[vars]
+# Optional: Set the batch size for imports. Defaults to 30 if not set.
+# Set to 0 means no batching (all records imported in a single batch).
+# IMPORT_BATCH_SIZE = "30"  
+
 [[d1_databases]]
 binding = "vault1"
 database_name = "vault1"
