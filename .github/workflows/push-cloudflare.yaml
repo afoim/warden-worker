@@ -38,6 +38,7 @@ jobs:
                   if ! command -v worker-build &> /dev/null; then
                     cargo install worker-build
                   fi
+
             - name: Replace D1_DATABASE_ID in wrangler.toml
               run: sed -i "s/\${D1_DATABASE_ID}/${{ secrets.D1_DATABASE_ID }}/g" wrangler.toml
 
