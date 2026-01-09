@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Warden Worker</title>
+    <title>Warden Worker - Bitwarden 兼容服务器</title>
     <style>
         body {
             font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
@@ -34,6 +34,15 @@
             margin-bottom: 2rem;
             line-height: 1.6;
         }
+        .warning {
+            color: #d32f2f;
+            background-color: #ffebee;
+            padding: 1rem;
+            border-radius: 6px;
+            margin-top: 1.5rem;
+            font-size: 0.9rem;
+            text-align: left;
+        }
         .btn {
             display: inline-block;
             background-color: #175ddc;
@@ -58,7 +67,22 @@
     <div class="container">
         <h1>Warden Worker</h1>
         <p>
-            目前无法更改密码，由于加解密实现复杂，如果你想更改主密码，请导出密码库，然后重新部署该项目
+            这是一个运行在 Cloudflare Workers 上的 Bitwarden 兼容服务器。<br>
+            您可以使用官方 Bitwarden 客户端连接到此服务器。
+        </p>
+        
+        <div class="warning">
+            <strong>⚠️ 关于修改主密码</strong><br>
+            目前本服务器不支持在线修改主密码。由于 Bitwarden 的客户端加密实现较为复杂，为避免数据损坏，请勿尝试在此处修改。<br><br>
+            如果您必须修改主密码，建议的流程是：<br>
+            1. 在客户端导出所有密码库数据。<br>
+            2. 重新部署本服务器（重置数据库）。<br>
+            3. 使用新密码注册账号并导入数据。
+        </div>
+        
+        <div class="footer">
+            Powered by Warden Worker
+        </div>
     </div>
 </body>
 </html>

@@ -1,6 +1,7 @@
 use axum::{
     routing::{get, post, put, delete},
     Router,
+    response::Html,
 };
 use std::sync::Arc;
 use worker::Env;
@@ -11,6 +12,7 @@ pub fn api_router(env: Env) -> Router {
     let app_state = Arc::new(env);
 
     Router::new()
+        .route("/", get(|| async { Html(include_str!("../static/index.html")) }))
         // Identity/Auth routes
         .route("/identity/accounts/prelogin", post(accounts::prelogin))
         .route(
