@@ -24,7 +24,7 @@
     }
   ],
 
-    "observability": {
+  "observability": {
     "logs": {
       "enabled": false,
       "head_sampling_rate": 1,
