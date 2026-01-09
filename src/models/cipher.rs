@@ -282,3 +282,12 @@ pub struct CreateCipherRequest {
     #[serde(default)]
     pub collection_ids: Vec<String>,
 }
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CipherRequestFlat {
+    #[serde(flatten)]
+    pub cipher: CipherRequestData,
+    #[serde(default)]
+    pub collection_ids: Vec<String>,
+}

@@ -6,10 +6,52 @@ use uuid::Uuid;
 use worker::{query, Env};
 
 use crate::{
+    auth::Claims,
     db,
     error::AppError,
     models::user::{PreloginResponse, RegisterRequest, User},
 };
+
+#[worker::send]
+pub async fn profile(
+    claims: Claims,
+    State(env): State<Arc<Env>>,
+) -> Result<Json<Value>, AppError> {
+    let db = db::get_db(&env)?;
+    let user: User = query!(
+        &db,
+        "SELECT * FROM users WHERE id = ?1",
+        claims.sub
+    )
+    .map_err(|_| AppError::Database)?
+    .first(None)
+    .await?
+    .ok_or(AppError::NotFound("User not found".to_string()))?;
+
+    Ok(Json(json!({
+        "id": user.id,
+        "name": user.name,
+        "email": user.email,
+        "emailVerified": user.email_verified,
+        "premium": true,
+        "premiumFromOrganization": false,
+        "masterPasswordHint": user.master_password_hint,
+        "culture": "en-US",
+        "twoFactorEnabled": false,
+        "key": user.key,
+        "privateKey": user.private_key,
+        "securityStamp": user.security_stamp,
+        "organizations": [],
+        "object": "profile"
+    })))
+}
+
+#[worker::send]
+pub async fn revision_date(
+    _claims: Claims,
+) -> Result<Json<i64>, AppError> {
+    Ok(Json(chrono::Utc::now().timestamp_millis()))
+}
 
 #[worker::send]
 pub async fn prelogin(
