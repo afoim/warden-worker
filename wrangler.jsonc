@@ -4,14 +4,6 @@
   "main": "build/index.js",
   "compatibility_date": "2025-09-19",
 
-  // 自定义域名 / Routes（来自云端）
-  "routes": [
-    {
-      "pattern": "warden.2x.nz/*"
-      // jsonc 里不需要 custom_domain: true
-      // 只要是 apex / 自定义域名，Cloudflare 会自动识别
-    }
-  ],
 
   // D1 数据库绑定（必须完整，否则会被认为是新建/覆盖）
   "d1_databases": [

@@ -6,7 +6,7 @@ use axum::{
 use std::sync::Arc;
 use worker::Env;
 
-use crate::handlers::{accounts, ciphers, config, identity, sync, folders, import};
+use crate::handlers::{accounts, ciphers, config, identity, sync, folders, import, two_factor};
 
 pub fn api_router(env: Env) -> Router {
     let app_state = Arc::new(env);
@@ -26,6 +26,12 @@ pub fn api_router(env: Env) -> Router {
         )
         .route("/api/accounts/profile", get(accounts::profile))
         .route("/api/accounts/revision-date", get(accounts::revision_date))
+        .route("/api/accounts/password", put(accounts::change_master_password))
+        .route("/api/accounts/email", put(accounts::change_email))
+        .route("/api/two-factor", get(two_factor::two_factor_status))
+        .route("/api/two-factor/authenticator/request", post(two_factor::authenticator_request))
+        .route("/api/two-factor/authenticator/enable", post(two_factor::authenticator_enable))
+        .route("/api/two-factor/authenticator/disable", post(two_factor::authenticator_disable))
         // Main data sync route
         .route("/api/sync", get(sync::get_sync_data))
         // Ciphers CRUD

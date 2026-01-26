@@ -13,6 +13,7 @@ use crate::{
         sync::{Profile, SyncResponse},
         user::User,
     },
+    two_factor,
 };
 
 #[worker::send]
@@ -77,7 +78,7 @@ pub async fn get_sync_data(
         premium_from_organization: false,
         email_verified: true,
         force_password_reset: false,
-        two_factor_enabled: false,
+        two_factor_enabled: two_factor::is_authenticator_enabled(&db, &user_id).await?,
         uses_key_connector: false,
         creation_date: time,
         key: user.key,

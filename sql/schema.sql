@@ -1,6 +1,7 @@
 -- Drop tables if they exist to ensure a clean slate
 DROP TABLE IF EXISTS folders;
 DROP TABLE IF EXISTS ciphers;
+DROP TABLE IF EXISTS two_factor_authenticator;
 DROP TABLE IF EXISTS users;
 
 -- Users table to store user accounts and their master keys/hashes
@@ -42,6 +43,15 @@ CREATE TABLE IF NOT EXISTS folders (
     id TEXT PRIMARY KEY NOT NULL,
     user_id TEXT NOT NULL,
     name TEXT NOT NULL, -- Encrypted folder name
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS two_factor_authenticator (
+    user_id TEXT PRIMARY KEY NOT NULL,
+    enabled BOOLEAN NOT NULL DEFAULT 0,
+    secret_enc TEXT NOT NULL,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE

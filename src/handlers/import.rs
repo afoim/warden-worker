@@ -2,15 +2,17 @@ use axum::{extract::State, Json};
 use chrono::Utc;
 use std::sync::Arc;
 use uuid::Uuid;
-use worker::{query, Env, D1PreparedStatement};
+use worker::{D1Database, D1PreparedStatement, Env};
 use wasm_bindgen::JsValue;
 
 use crate::auth::Claims;
 use crate::db;
 use crate::error::AppError;
-use crate::models::cipher::{Cipher, CipherData};
+use crate::models::cipher::CipherData;
 use crate::models::folder::Folder;
 use crate::models::import::ImportRequest;
+
+const IMPORT_BATCH_SIZE: usize = 200;
 
 #[worker::send]
 pub async fn import_data(
@@ -22,9 +24,9 @@ pub async fn import_data(
     let now = Utc::now();
     let now = now.format("%Y-%m-%dT%H:%M:%S%.3fZ").to_string();
 
-    let mut folder_stmts: Vec<D1PreparedStatement> = Vec::new();
     let folder_query = "INSERT OR IGNORE INTO folders (id, user_id, name, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5)";
 
+    let mut folder_stmts: Vec<D1PreparedStatement> = Vec::new();
     for import_folder in &payload.folders {
         let folder = Folder {
             id: import_folder.id.clone(),
@@ -41,11 +43,12 @@ pub async fn import_data(
             folder.created_at.into(),
             folder.updated_at.into(),
         ])?);
+
+        if folder_stmts.len() >= IMPORT_BATCH_SIZE {
+            run_batch(&db, &mut folder_stmts).await?;
+        }
     }
-    
-    if !folder_stmts.is_empty() {
-        db.batch(folder_stmts).await.map_err(|_| AppError::Database)?;
-    }
+    run_batch(&db, &mut folder_stmts).await?;
 
     for relationship in payload.folder_relationships {
         if let Some(cipher) = payload.ciphers.get_mut(relationship.key) {
@@ -55,9 +58,9 @@ pub async fn import_data(
         }
     }
 
-    let mut cipher_stmts: Vec<D1PreparedStatement> = Vec::new();
     let cipher_query = "INSERT OR IGNORE INTO ciphers (id, user_id, organization_id, type, data, favorite, folder_id, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)";
 
+    let mut cipher_stmts: Vec<D1PreparedStatement> = Vec::new();
     for import_cipher in payload.ciphers {
         if import_cipher.encrypted_for != claims.sub {
             return Err(AppError::BadRequest("Cipher encrypted for wrong user".to_string()));
@@ -75,48 +78,41 @@ pub async fn import_data(
             reprompt: import_cipher.reprompt,
         };
 
-        let data_value = serde_json::to_value(&cipher_data).map_err(|_| AppError::Internal)?;
-
-        let cipher = Cipher {
-            id: Uuid::new_v4().to_string(),
-            user_id: Some(claims.sub.clone()),
-            organization_id: import_cipher.organization_id.clone(),
-            r#type: import_cipher.r#type,
-            data: data_value,
-            favorite: import_cipher.favorite,
-            folder_id: import_cipher.folder_id.clone(),
-            deleted_at: None,
-            created_at: now.clone(),
-            updated_at: now.clone(),
-            object: "cipher".to_string(),
-            organization_use_totp: false,
-            edit: true,
-            view_password: true,
-            collection_ids: None,
-        };
-
-        let data = serde_json::to_string(&cipher.data).map_err(|_| AppError::Internal)?;
+        let id = Uuid::new_v4().to_string();
+        let user_id = claims.sub.clone();
+        let data = serde_json::to_string(&cipher_data).map_err(|_| AppError::Internal)?;
 
         cipher_stmts.push(db.prepare(cipher_query).bind(&[
-            cipher.id.into(),
-            to_js_val(cipher.user_id),
-            to_js_val(cipher.organization_id),
-            cipher.r#type.into(),
+            id.into(),
+            user_id.into(),
+            to_js_val(import_cipher.organization_id),
+            import_cipher.r#type.into(),
             data.into(),
-            cipher.favorite.into(),
-            to_js_val(cipher.folder_id),
-            cipher.created_at.into(),
-            cipher.updated_at.into(),
+            import_cipher.favorite.into(),
+            to_js_val(import_cipher.folder_id),
+            now.clone().into(),
+            now.clone().into(),
         ])?);
+
+        if cipher_stmts.len() >= IMPORT_BATCH_SIZE {
+            run_batch(&db, &mut cipher_stmts).await?;
+        }
     }
-    
-    if !cipher_stmts.is_empty() {
-        db.batch(cipher_stmts).await.map_err(|_| AppError::Database)?;
-    }
+    run_batch(&db, &mut cipher_stmts).await?;
 
     Ok(Json(()))
 }
 
 fn to_js_val<T: Into<JsValue>>(val: Option<T>) -> JsValue {
     val.map(Into::into).unwrap_or(JsValue::NULL)
+}
+
+async fn run_batch(db: &D1Database, stmts: &mut Vec<D1PreparedStatement>) -> Result<(), AppError> {
+    if stmts.is_empty() {
+        return Ok(());
+    }
+
+    let stmts = std::mem::take(stmts);
+    db.batch(stmts).await.map_err(|_| AppError::Database)?;
+    Ok(())
 }
