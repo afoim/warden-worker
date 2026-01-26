@@ -1,8 +1,9 @@
-use axum::Json;
+use axum::{http::HeaderMap, Json};
+use chrono::Utc;
 use serde_json::{json, Value};
 
 #[worker::send]
-pub async fn config() -> Json<Value> {
+pub async fn config(headers: HeaderMap) -> Json<Value> {
     // let domain = crate::CONFIG.domain();
     // Official available feature flags can be found here:
     // Server (v2025.6.2): https://github.com/bitwarden/server/blob/d094be3267f2030bd0dc62106bc6871cf82682f5/src/Core/Constants.cs#L103
@@ -17,14 +18,22 @@ pub async fn config() -> Json<Value> {
     // feature_states.insert("enable-pm-flight-recorder".to_string(), true);
     // feature_states.insert("mobile-error-reporting".to_string(), true);
 
-    let domain = "https://warden-worker.deepgauravraj.workers.dev";
+    let host = headers
+        .get("host")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("localhost");
+    let proto = headers
+        .get("x-forwarded-proto")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("https");
+    let domain = format!("{proto}://{host}");
     Json(json!({
         // Note: The clients use this version to handle backwards compatibility concerns
         // This means they expect a version that closely matches the Bitwarden server version
         // We should make sure that we keep this updated when we support the new server features
         // Version history:
         // - Individual cipher key encryption: 2024.2.0
-        "version": "2024.7.0",
+        "version": "2025.12.0",
         "gitHash": "25cf6119-dirty",
         "server": {
           "name": "Vaultwarden",
@@ -38,7 +47,7 @@ pub async fn config() -> Json<Value> {
           "api": format!("{domain}/api"),
           "identity": format!("{domain}/identity"),
           "notifications": format!("{domain}/notifications"),
-          "sso": format!("{domain}/sso"),
+          "sso": null,
           "cloudRegion": null,
         },
         // Bitwarden uses this for the self-hosted servers to indicate the default push technology
@@ -51,5 +60,29 @@ pub async fn config() -> Json<Value> {
             // "flexible-collections-v-1": false
         },
         "object": "config",
+    }))
+}
+
+#[worker::send]
+pub async fn now() -> Json<String> {
+    Json(Utc::now().to_rfc3339())
+}
+
+#[worker::send]
+pub async fn alive() -> Json<String> {
+    now().await
+}
+
+#[worker::send]
+pub async fn version() -> Json<&'static str> {
+    Json("2025.12.0")
+}
+
+#[worker::send]
+pub async fn webauthn() -> Json<Value> {
+    Json(json!({
+        "object": "list",
+        "data": [],
+        "continuationToken": null
     }))
 }

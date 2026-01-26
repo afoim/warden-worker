@@ -45,7 +45,8 @@ rand = { version = "0.8" }
 getrandom = { version = "0.3", features = ["wasm_js"] }
 constant_time_eq = "0.3"
 aes-gcm = "0.10"
-totp-rs = { version = "5.7.0", default-features = false, features = ["otpauth", "gen_secret"] }
+totp-rs = { version = "5.7.0", default-features = false, features = ["otpauth", "gen_secret", "qr"] }
+sha2 = "0.10"
 
 # Utilities
 chrono = { version = "0.4", features = ["serde"] }

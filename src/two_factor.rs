@@ -1,6 +1,7 @@
 use aes_gcm::aead::{Aead, KeyInit, Payload};
 use aes_gcm::{Aes256Gcm, Key, Nonce};
 use base64::{engine::general_purpose, Engine as _};
+use js_sys::Date;
 use rand::rngs::OsRng;
 use rand::RngCore;
 use totp_rs::{Algorithm, Secret, TOTP};
@@ -164,7 +165,11 @@ pub fn decrypt_secret_with_optional_key(
                 aad: user_id.as_bytes(),
             },
         )
-        .map_err(|_| AppError::Internal)?;
+        .map_err(|_| {
+            AppError::BadRequest(
+                "Two-factor secret cannot be decrypted. Please regenerate the secret.".to_string(),
+            )
+        })?;
 
     Ok(String::from_utf8(pt).map_err(|_| AppError::Internal)?)
 }
@@ -186,5 +191,6 @@ pub fn verify_totp_code(secret_encoded: &str, token: &str) -> Result<bool, AppEr
         "".to_string(),
     )
     .map_err(|_| AppError::Internal)?;
-    Ok(totp.check_current(token).unwrap_or(false))
+    let unix_seconds = (Date::now() / 1000.0).floor() as u64;
+    Ok(totp.check(token, unix_seconds))
 }

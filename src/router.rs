@@ -6,7 +6,7 @@ use axum::{
 use std::sync::Arc;
 use worker::Env;
 
-use crate::handlers::{accounts, ciphers, config, identity, sync, folders, import, two_factor};
+use crate::handlers::{accounts, ciphers, config, identity, sync, folders, import, two_factor, devices};
 
 pub fn api_router(env: Env) -> Router {
     let app_state = Arc::new(env);
@@ -15,6 +15,7 @@ pub fn api_router(env: Env) -> Router {
         .route("/", get(|| async { Html(include_str!("../static/index.html")) }))
         // Identity/Auth routes
         .route("/identity/accounts/prelogin", post(accounts::prelogin))
+        .route("/api/accounts/prelogin", post(accounts::prelogin))
         .route(
             "/identity/accounts/register/finish",
             post(accounts::register),
@@ -26,6 +27,7 @@ pub fn api_router(env: Env) -> Router {
         )
         .route("/api/accounts/profile", get(accounts::profile))
         .route("/api/accounts/revision-date", get(accounts::revision_date))
+        .route("/api/devices/knowndevice", get(devices::knowndevice))
         .route("/api/accounts/password", put(accounts::change_master_password))
         .route("/api/accounts/email", put(accounts::change_email))
         .route("/api/two-factor", get(two_factor::two_factor_status))
@@ -45,5 +47,9 @@ pub fn api_router(env: Env) -> Router {
         .route("/api/folders/{id}", put(folders::update_folder))
         .route("/api/folders/{id}", delete(folders::delete_folder))
         .route("/api/config", get(config::config))
+        .route("/api/alive", get(config::alive))
+        .route("/api/now", get(config::now))
+        .route("/api/version", get(config::version))
+        .route("/api/webauthn", get(config::webauthn))
         .with_state(app_state)
 }

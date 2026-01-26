@@ -3,7 +3,7 @@ use chrono::Utc;
 use serde::Deserialize;
 use serde_json::json;
 use std::sync::Arc;
-use totp_rs::Secret;
+use totp_rs::{Algorithm, Secret, TOTP};
 use worker::Env;
 
 use crate::auth::Claims;
@@ -75,17 +75,25 @@ pub async fn authenticator_request(
         .unwrap_or_else(|| "Warden Worker".to_string());
     let issuer = issuer.replace(':', "");
     let account = user_email.replace(':', "");
-    let label = format!("{}:{}", issuer, account);
-    let otpauth = format!(
-        "otpauth://totp/{}?secret={}&issuer={}",
-        label,
-        secret_encoded,
-        issuer
-    );
+    let totp = TOTP::new(
+        Algorithm::SHA1,
+        6,
+        1,
+        30,
+        Secret::Encoded(secret_encoded.clone())
+            .to_bytes()
+            .map_err(|_| AppError::Internal)?,
+        Some(issuer.clone()),
+        account.clone(),
+    )
+    .map_err(|_| AppError::Internal)?;
+    let otpauth = totp.get_url();
+    let qr_base64 = totp.get_qr_base64().map_err(|_| AppError::Internal)?;
 
     Ok(Json(json!({
         "secret": secret_encoded,
-        "otpauth": otpauth
+        "otpauth": otpauth,
+        "qrBase64": qr_base64
     })))
 }
 
@@ -102,11 +110,17 @@ pub async fn authenticator_enable(
         .await?
         .ok_or_else(|| AppError::BadRequest("No pending authenticator setup".to_string()))?;
     let two_factor_key_b64 = env.secret("TWO_FACTOR_ENC_KEY").ok().map(|s| s.to_string());
-    let secret_encoded = two_factor::decrypt_secret_with_optional_key(
+    let secret_encoded = match two_factor::decrypt_secret_with_optional_key(
         two_factor_key_b64.as_deref(),
         &claims.sub,
         &secret_enc,
-    )?;
+    ) {
+        Ok(v) => v,
+        Err(e) => {
+            let _ = two_factor::disable_authenticator(&db, &claims.sub).await;
+            return Err(e);
+        }
+    };
     if !two_factor::verify_totp_code(&secret_encoded, &payload.code)? {
         return Err(AppError::BadRequest("Invalid TOTP code".to_string()));
     }

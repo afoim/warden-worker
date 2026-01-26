@@ -3,13 +3,35 @@ use axum::http::StatusCode;
 use axum::response::Response;
 use chrono::{Duration, Utc};
 use constant_time_eq::constant_time_eq;
+use base64::{engine::general_purpose, Engine as _};
+use rand::RngCore;
 use jsonwebtoken::{decode, encode, DecodingKey, EncodingKey, Header, Validation};
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
+use serde::de::{self, Deserializer};
 use serde_json::{json, Value};
 use std::sync::Arc;
+use uuid::Uuid;
 use worker::Env;
+use sha2::{Digest, Sha256};
 
 use crate::{auth::Claims, db, error::AppError, models::user::User, two_factor};
+
+fn deserialize_trimmed_i32_opt<'de, D>(deserializer: D) -> Result<Option<i32>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let opt: Option<String> = Option::deserialize(deserializer)?;
+    match opt {
+        None => Ok(None),
+        Some(s) => {
+            let s = s.trim();
+            if s.is_empty() {
+                return Ok(None);
+            }
+            s.parse::<i32>().map(Some).map_err(de::Error::custom)
+        }
+    }
+}
 
 #[derive(Debug, Deserialize)]
 pub struct TokenRequest {
@@ -17,52 +39,31 @@ pub struct TokenRequest {
     username: Option<String>,
     password: Option<String>, // This is the masterPasswordHash
     refresh_token: Option<String>,
+    scope: Option<String>,
+    client_id: Option<String>,
+    #[serde(rename = "deviceIdentifier")]
+    device_identifier: Option<String>,
+    #[serde(rename = "deviceName")]
+    device_name: Option<String>,
+    #[serde(rename = "deviceType")]
+    #[serde(default, deserialize_with = "deserialize_trimmed_i32_opt")]
+    device_type: Option<i32>,
     #[serde(rename = "twoFactorToken")]
     two_factor_token: Option<String>,
     #[serde(rename = "twoFactorProvider")]
+    #[serde(default, deserialize_with = "deserialize_trimmed_i32_opt")]
     two_factor_provider: Option<i32>,
     #[serde(rename = "twoFactorRemember")]
+    #[serde(default, deserialize_with = "deserialize_trimmed_i32_opt")]
     two_factor_remember: Option<i32>,
-}
-
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "PascalCase")]
-pub struct TokenResponse {
-    #[serde(rename = "access_token")]
-    access_token: String,
-    #[serde(rename = "expires_in")]
-    expires_in: i64,
-    #[serde(rename = "token_type")]
-    token_type: String,
-    #[serde(rename = "refresh_token")]
-    refresh_token: String,
-    #[serde(rename = "Key")]
-    key: String,
-    #[serde(rename = "PrivateKey")]
-    private_key: String,
-    #[serde(rename = "Kdf")]
-    kdf: i32,
-    #[serde(rename = "ResetMasterPassword")]
-    reset_master_password: bool,
-    #[serde(rename = "ForcePasswordReset")]
-    force_password_reset: bool,
-    #[serde(rename = "UserDecryptionOptions")]
-    user_decryption_options: UserDecryptionOptions,
-}
-
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "PascalCase")]
-pub struct UserDecryptionOptions {
-    pub has_master_password: bool,
-    pub object: String,
 }
 
 fn generate_tokens_and_response(
     user: User,
     env: &Arc<Env>,
-) -> Result<TokenResponse, AppError> {
+) -> Result<Value, AppError> {
     let now = Utc::now();
-    let expires_in = Duration::hours(1);
+    let expires_in = Duration::hours(2);
     let exp = (now + expires_in).timestamp() as usize;
 
     let access_claims = Claims {
@@ -102,29 +103,93 @@ fn generate_tokens_and_response(
         &EncodingKey::from_secret(jwt_refresh_secret.as_ref()),
     )?;
 
-    Ok(TokenResponse {
-        access_token,
-        expires_in: expires_in.num_seconds(),
-        token_type: "Bearer".to_string(),
-        refresh_token,
-        key: user.key,
-        private_key: user.private_key,
-        kdf: user.kdf_type,
-        force_password_reset: false,
-        reset_master_password: false,
-        user_decryption_options: UserDecryptionOptions {
-            has_master_password: true,
-            object: "userDecryptionOptions".to_string(),
+    Ok(json!({
+        "ForcePasswordReset": false,
+        "Kdf": user.kdf_type,
+        "KdfIterations": user.kdf_iterations,
+        "KdfMemory": null,
+        "KdfParallelism": null,
+        "Key": user.key,
+        "MasterPasswordPolicy": { "Object": "masterPasswordPolicy" },
+        "PrivateKey": user.private_key,
+        "ResetMasterPassword": false,
+        "UserDecryptionOptions": {
+            "HasMasterPassword": true,
+            "MasterPasswordUnlock": {
+                "Kdf": {
+                    "KdfType": user.kdf_type,
+                    "Iterations": user.kdf_iterations,
+                    "Memory": null,
+                    "Parallelism": null
+                },
+                "MasterKeyEncryptedUserKey": user.key,
+                "MasterKeyWrappedUserKey": user.key,
+                "Salt": user.email
+            },
+            "Object": "userDecryptionOptions"
         },
-    })
+        "AccountKeys": {
+            "publicKeyEncryptionKeyPair": {
+                "wrappedPrivateKey": user.private_key,
+                "publicKey": user.public_key,
+                "Object": "publicKeyEncryptionKeyPair"
+            },
+            "Object": "privateKeys"
+        },
+        "access_token": access_token,
+        "expires_in": expires_in.num_seconds(),
+        "refresh_token": refresh_token,
+        "scope": "api offline_access",
+        "token_type": "Bearer"
+    }))
+}
+
+async fn ensure_devices_table(db: &worker::D1Database) -> Result<(), AppError> {
+    db.prepare(
+        "CREATE TABLE IF NOT EXISTS devices (
+            id TEXT PRIMARY KEY NOT NULL,
+            user_id TEXT NOT NULL,
+            device_identifier TEXT NOT NULL,
+            device_name TEXT,
+            device_type INTEGER,
+            remember_token_hash TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            UNIQUE(user_id, device_identifier),
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+        )",
+    )
+    .run()
+    .await
+    .map_err(|_| AppError::Database)?;
+
+    let _ = db
+        .prepare("ALTER TABLE devices ADD COLUMN remember_token_hash TEXT")
+        .run()
+        .await;
+
+    Ok(())
+}
+
+fn sha256_hex(input: &str) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(input.as_bytes());
+    hex::encode(hasher.finalize())
+}
+
+fn generate_remember_token() -> String {
+    let mut bytes = [0u8; 32];
+    rand::rngs::OsRng.fill_bytes(&mut bytes);
+    general_purpose::URL_SAFE_NO_PAD.encode(bytes)
 }
 
 fn two_factor_required_response() -> Response {
     (
         StatusCode::BAD_REQUEST,
         Json(json!({
-            "TwoFactorProviders": [two_factor::TWO_FACTOR_PROVIDER_AUTHENTICATOR],
+            "TwoFactorProviders": [two_factor::TWO_FACTOR_PROVIDER_AUTHENTICATOR.to_string()],
             "TwoFactorProviders2": { "0": null },
+            "MasterPasswordPolicy": { "Object": "masterPasswordPolicy" },
             "error": "invalid_grant",
             "error_description": "Two factor required."
         })),
@@ -136,8 +201,11 @@ fn invalid_two_factor_response() -> Response {
     (
         StatusCode::BAD_REQUEST,
         Json(json!({
+            "TwoFactorProviders": [two_factor::TWO_FACTOR_PROVIDER_AUTHENTICATOR.to_string()],
+            "TwoFactorProviders2": { "0": null },
+            "MasterPasswordPolicy": { "Object": "masterPasswordPolicy" },
             "error": "invalid_grant",
-            "error_description": "Invalid TOTP code."
+            "error_description": "Invalid two factor token."
         })),
     )
         .into_response()
@@ -175,32 +243,111 @@ pub async fn token(
             }
 
             let two_factor_enabled = two_factor::is_authenticator_enabled(&db, &user.id).await?;
+            let mut remember_token_to_return: Option<String> = None;
             if two_factor_enabled {
-                let Some(provider) = payload.two_factor_provider else {
-                    return Ok(two_factor_required_response());
-                };
-                if provider != two_factor::TWO_FACTOR_PROVIDER_AUTHENTICATOR {
+                let provider = payload.two_factor_provider;
+                let token = payload.two_factor_token.clone();
+
+                if provider == Some(5) {
+                    let Some(device_identifier) = payload.device_identifier.as_deref() else {
+                        return Ok(two_factor_required_response());
+                    };
+                    let Some(token) = token.as_deref() else {
+                        return Ok(two_factor_required_response());
+                    };
+
+                    ensure_devices_table(&db).await?;
+                    let row: Option<Value> = db
+                        .prepare(
+                            "SELECT remember_token_hash FROM devices WHERE user_id = ?1 AND device_identifier = ?2",
+                        )
+                        .bind(&[user.id.clone().into(), device_identifier.into()])?
+                        .first(None)
+                        .await
+                        .map_err(|_| AppError::Database)?;
+                    let stored_hash = row
+                        .and_then(|v| v.get("remember_token_hash").cloned())
+                        .and_then(|v| v.as_str().map(|s| s.to_string()));
+                    let Some(stored_hash) = stored_hash else {
+                        return Ok(two_factor_required_response());
+                    };
+                    let candidate_hash = sha256_hex(token);
+                    if !constant_time_eq(stored_hash.as_bytes(), candidate_hash.as_bytes()) {
+                        return Ok(two_factor_required_response());
+                    }
+                } else if provider == Some(two_factor::TWO_FACTOR_PROVIDER_AUTHENTICATOR) {
+                    let Some(token) = token.as_deref() else {
+                        return Ok(two_factor_required_response());
+                    };
+
+                    let secret_enc = two_factor::get_authenticator_secret_enc(&db, &user.id)
+                        .await?
+                        .ok_or_else(|| AppError::Internal)?;
+                    let two_factor_key_b64 =
+                        env.secret("TWO_FACTOR_ENC_KEY").ok().map(|s| s.to_string());
+                    let secret_encoded = two_factor::decrypt_secret_with_optional_key(
+                        two_factor_key_b64.as_deref(),
+                        &user.id,
+                        &secret_enc,
+                    )?;
+                    if !two_factor::verify_totp_code(&secret_encoded, token)? {
+                        return Ok(invalid_two_factor_response());
+                    }
+                } else {
                     return Ok(two_factor_required_response());
                 }
-                let Some(token) = payload.two_factor_token else {
-                    return Ok(two_factor_required_response());
-                };
 
-                let secret_enc = two_factor::get_authenticator_secret_enc(&db, &user.id)
-                    .await?
-                    .ok_or_else(|| AppError::Internal)?;
-                let two_factor_key_b64 = env.secret("TWO_FACTOR_ENC_KEY").ok().map(|s| s.to_string());
-                let secret_encoded = two_factor::decrypt_secret_with_optional_key(
-                    two_factor_key_b64.as_deref(),
-                    &user.id,
-                    &secret_enc,
-                )?;
-                if !two_factor::verify_totp_code(&secret_encoded, &token)? {
-                    return Ok(invalid_two_factor_response());
+                if payload.device_identifier.is_some() {
+                    remember_token_to_return = Some(generate_remember_token());
                 }
             }
 
-            let response = generate_tokens_and_response(user, &env)?;
+            let user_id = user.id.clone();
+            let device_identifier = payload.device_identifier.clone();
+            let device_name = payload.device_name.clone();
+            let device_type = payload.device_type;
+
+            let mut response = generate_tokens_and_response(user, &env)?;
+
+            if let Some(device_identifier) = device_identifier.as_deref() {
+                ensure_devices_table(&db).await?;
+
+                let now = Utc::now().to_rfc3339();
+                let remember_hash = remember_token_to_return
+                    .as_deref()
+                    .map(sha256_hex);
+
+                if let Ok(stmt) = db
+                    .prepare(
+                        "INSERT INTO devices (id, user_id, device_identifier, device_name, device_type, remember_token_hash, created_at, updated_at)
+                         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+                         ON CONFLICT(user_id, device_identifier) DO UPDATE SET
+                           updated_at = excluded.updated_at,
+                           device_name = excluded.device_name,
+                           device_type = excluded.device_type,
+                           remember_token_hash = COALESCE(excluded.remember_token_hash, devices.remember_token_hash)",
+                    )
+                    .bind(&[
+                        Uuid::new_v4().to_string().into(),
+                        user_id.clone().into(),
+                        device_identifier.into(),
+                        device_name.clone().into(),
+                        device_type.map(|v| v as i64).into(),
+                        remember_hash.clone().into(),
+                        now.clone().into(),
+                        now.into(),
+                    ])
+                {
+                    let _ = stmt.run().await;
+                }
+            }
+
+            if let Some(token) = remember_token_to_return {
+                if let Some(obj) = response.as_object_mut() {
+                    obj.insert("TwoFactorToken".to_string(), Value::String(token));
+                }
+            }
+
             Ok(Json(response).into_response())
         }
         "refresh_token" => {

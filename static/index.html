@@ -146,6 +146,10 @@
                 <textarea id="totpOtpauth" rows="3" readonly style="width: 100%; padding: 0.6rem; border-radius: 6px; border: 1px solid #ddd; box-sizing: border-box; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace;"></textarea>
             </div>
             <div style="margin-top: 0.75rem;">
+                <div style="margin-bottom: 0.4rem; font-weight: 600;">二维码</div>
+                <img id="totpQr" alt="TOTP QR" style="width: 220px; height: 220px; background: white; border-radius: 8px; border: 1px solid #ddd;">
+            </div>
+            <div style="margin-top: 0.75rem;">
                 <div style="margin-bottom: 0.4rem; font-weight: 600;">验证码</div>
                 <input id="totpCode" type="text" placeholder="6 位验证码" style="width: 100%; padding: 0.6rem; border-radius: 6px; border: 1px solid #ddd; box-sizing: border-box;">
             </div>
@@ -180,6 +184,7 @@
         const totpDisableBtn = document.getElementById('totpDisable');
         const totpSecretInput = document.getElementById('totpSecret');
         const totpOtpauthInput = document.getElementById('totpOtpauth');
+        const totpQrImg = document.getElementById('totpQr');
         const totpCodeInput = document.getElementById('totpCode');
         const resultTotpEl = document.getElementById('resultTotp');
 
@@ -523,6 +528,7 @@
             resultTotpEl.textContent = '';
             totpSecretInput.value = '';
             totpOtpauthInput.value = '';
+            totpQrImg.removeAttribute('src');
             totpAccessToken = null;
 
             try {
@@ -555,6 +561,11 @@
                 const data = JSON.parse(text);
                 totpSecretInput.value = data.secret || '';
                 totpOtpauthInput.value = data.otpauth || '';
+                if (data.qrBase64) {
+                    totpQrImg.setAttribute('src', `data:image/png;base64,${data.qrBase64}`);
+                } else {
+                    totpQrImg.removeAttribute('src');
+                }
                 resultTotpEl.textContent = '密钥已生成。请在认证器 App 中添加后输入验证码并点击“启用”。';
             } catch (err) {
                 resultTotpEl.textContent = String(err);

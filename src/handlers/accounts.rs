@@ -106,6 +106,8 @@ pub async fn prelogin(
     Ok(Json(PreloginResponse {
         kdf: 0, // PBKDF2
         kdf_iterations: kdf_iterations.unwrap_or(600_000),
+        kdf_memory: None,
+        kdf_parallelism: None,
     }))
 }
 
