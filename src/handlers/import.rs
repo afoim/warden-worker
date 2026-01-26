@@ -2,7 +2,8 @@ use axum::{extract::State, Json};
 use chrono::Utc;
 use std::sync::Arc;
 use uuid::Uuid;
-use worker::{query, Env};
+use worker::{query, Env, D1PreparedStatement};
+use wasm_bindgen::JsValue;
 
 use crate::auth::Claims;
 use crate::db;
@@ -21,6 +22,9 @@ pub async fn import_data(
     let now = Utc::now();
     let now = now.format("%Y-%m-%dT%H:%M:%S%.3fZ").to_string();
 
+    let mut folder_stmts: Vec<D1PreparedStatement> = Vec::new();
+    let folder_query = "INSERT OR IGNORE INTO folders (id, user_id, name, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5)";
+
     for import_folder in &payload.folders {
         let folder = Folder {
             id: import_folder.id.clone(),
@@ -30,18 +34,17 @@ pub async fn import_data(
             updated_at: now.clone(),
         };
 
-        query!(
-            &db,
-            "INSERT OR IGNORE INTO folders (id, user_id, name, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5)",
-            folder.id,
-            folder.user_id,
-            folder.name,
-            folder.created_at,
-            folder.updated_at
-        )
-        .map_err(|_| AppError::Database)?
-        .run()
-        .await?;
+        folder_stmts.push(db.prepare(folder_query).bind(&[
+            folder.id.into(),
+            folder.user_id.into(),
+            folder.name.into(),
+            folder.created_at.into(),
+            folder.updated_at.into(),
+        ])?);
+    }
+    
+    if !folder_stmts.is_empty() {
+        db.batch(folder_stmts).await.map_err(|_| AppError::Database)?;
     }
 
     for relationship in payload.folder_relationships {
@@ -51,6 +54,9 @@ pub async fn import_data(
             }
         }
     }
+
+    let mut cipher_stmts: Vec<D1PreparedStatement> = Vec::new();
+    let cipher_query = "INSERT OR IGNORE INTO ciphers (id, user_id, organization_id, type, data, favorite, folder_id, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)";
 
     for import_cipher in payload.ciphers {
         if import_cipher.encrypted_for != claims.sub {
@@ -91,23 +97,26 @@ pub async fn import_data(
 
         let data = serde_json::to_string(&cipher.data).map_err(|_| AppError::Internal)?;
 
-        query!(
-            &db,
-            "INSERT OR IGNORE INTO ciphers (id, user_id, organization_id, type, data, favorite, folder_id, created_at, updated_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
-             cipher.id,
-             cipher.user_id,
-             cipher.organization_id,
-             cipher.r#type,
-             data,
-             cipher.favorite,
-             cipher.folder_id,
-             cipher.created_at,
-             cipher.updated_at,
-        ).map_err(|_|AppError::Database)?
-        .run()
-        .await?;
+        cipher_stmts.push(db.prepare(cipher_query).bind(&[
+            cipher.id.into(),
+            to_js_val(cipher.user_id),
+            to_js_val(cipher.organization_id),
+            cipher.r#type.into(),
+            data.into(),
+            cipher.favorite.into(),
+            to_js_val(cipher.folder_id),
+            cipher.created_at.into(),
+            cipher.updated_at.into(),
+        ])?);
+    }
+    
+    if !cipher_stmts.is_empty() {
+        db.batch(cipher_stmts).await.map_err(|_| AppError::Database)?;
     }
 
     Ok(Json(()))
+}
+
+fn to_js_val<T: Into<JsValue>>(val: Option<T>) -> JsValue {
+    val.map(Into::into).unwrap_or(JsValue::NULL)
 }
