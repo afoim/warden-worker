@@ -26,6 +26,6 @@
 
   // 构建配置（等价于 [build]）
   "build": {
-    "command": "cargo install -q worker-build && worker-build --release"
+    "command": "worker-build --release"
   }
 }

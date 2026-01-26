@@ -1,138 +1,92 @@
 # Warden Worker
 
-Warden Worker 是一个运行在 Cloudflare Workers 上的轻量级 Bitwarden 兼容服务器。它利用 Cloudflare D1 作为数据库，使用 Rust 编写，旨在提供一个免费、无需维护且易于部署的个人密码管理解决方案。
+Warden Worker 是一个运行在 Cloudflare Workers 上的轻量级 Bitwarden 兼容服务端实现，使用 Cloudflare D1（SQLite）作为数据存储，核心代码用 Rust 编写，目标是“个人/家庭可用、部署成本低、无需维护服务器”。
 
-## 🌟 功能特性
+本项目不接触你的明文密码：Bitwarden 系列客户端会在本地完成加密，服务端只保存密文数据。
 
-- **完全无服务器架构**：运行在 Cloudflare Workers 上，无需购买 VPS 或维护服务器。
-- **低延迟数据库**：使用 Cloudflare D1 (基于 SQLite) 存储数据。
-- **广泛的客户端兼容性**：
-  - ✅ 官方 Bitwarden 浏览器扩展（Chrome, Edge, Firefox, Safari 等）。
-  - ✅ 官方 Bitwarden 移动端应用（Android, iOS）。
-  - ✅ 官方 Bitwarden 桌面端应用。
-- **核心功能支持**：
-  - 🔐 密码库管理（查看、添加、编辑、删除）。
-  - 📂 文件夹管理。
-  - 🔢 TOTP（两步验证码）生成与存储。
-  - 🔄 多端同步。
-- **免费托管**：充分利用 Cloudflare Workers 和 D1 的免费层额度，适合个人及家庭使用。
+> [!WARNING]
+> 如果你曾经部署过旧版本并准备升级，建议在客户端导出密码库 → 重新部署本项目（全新初始化数据库）→ 再导入密码库（可显著降低迁移/兼容成本）。
 
-## 🚀 部署指南
+## 功能
 
-### 前置要求
+- 无服务器部署：Cloudflare Workers + D1
+- 兼容多端：官方 Bitwarden（浏览器扩展 / 桌面 / 安卓）与多数第三方客户端
+- 核心能力：注册/登录、同步、密码项（Cipher）增删改、文件夹、TOTP（Authenticator）二步验证
+- 官方安卓兼容：支持 `/api/devices/knowndevice` 与 remember-device（twoFactorProvider=5）流程
 
-- 一个 [Cloudflare](https://www.cloudflare.com/) 账号。
-- 安装 [Wrangler CLI](https://developers.cloudflare.com/workers/wrangler/install-and-update/) (`npm install -g wrangler`)。
-- 安装 [Rust](https://www.rust-lang.org/tools/install) 开发环境。
+## 快速部署（Cloudflare）
 
-### 1. 克隆项目
+### 0. 前置条件
 
-```bash
-git clone https://github.com/your-username/warden-worker.git
-cd warden-worker
-```
+- Cloudflare 账号
+- Node.js + Wrangler：`npm i -g wrangler`
+- Rust 工具链（建议稳定版）
+- 安装 worker-build：`cargo install worker-build`
 
-### 2. 创建 D1 数据库
-
-在 Cloudflare 上创建一个新的 D1 数据库：
+### 1. 创建 D1 数据库
 
 ```bash
 wrangler d1 create vault1
 ```
 
-执行成功后，控制台会输出 `database_id`。
+把输出的 `database_id` 写入 `wrangler.jsonc` 的 `d1_databases`。
 
-### 3. 配置 Wrangler
+### 2. 初始化数据库
 
-打开项目根目录下的 `wrangler.jsonc` 文件，找到 `d1_databases` 配置块，将 `database_id` 替换为你刚才创建的 ID：
-
-```jsonc
-  "d1_databases": [
-    {
-      "binding": "vault1",
-      "database_id": "你的_DATABASE_ID"
-    }
-  ],
-```
-
-### 4. 初始化数据库
-
-使用提供的 SQL 脚本初始化数据库表结构：
+注意：`sql/schema_full.sql` 会 `DROP TABLE`，仅用于全新部署（会清空数据）。
 
 ```bash
-# 初始化远程数据库（用于生产环境）
-wrangler d1 execute vault1 --remote --file=sql/schema.sql
+wrangler d1 execute vault1 --remote --file=sql/schema_full.sql
 ```
 
-### 5. 设置环境变量
+`sql/schema.sql` 仅保留为历史/兼容用途；推荐新部署直接使用 `sql/schema_full.sql`。
 
-为了安全起见，需要设置以下环境变量。请使用 `wrangler secret put` 命令逐个设置：
-
-- **`JWT_SECRET`**: 用于签发 JWT 访问令牌的密钥（建议生成一个随机的长字符串）。
-- **`JWT_REFRESH_SECRET`**: 用于签发刷新令牌的密钥（建议生成一个随机的长字符串）。
-- **`ALLOWED_EMAILS`**: 允许注册的邮箱白名单，多个邮箱用逗号分隔（例如 `me@example.com,family@example.com`）。**注意：不在列表中的邮箱将无法注册。**
+### 3. 配置密钥（Secrets）
 
 ```bash
 wrangler secret put JWT_SECRET
-# 输入你的密钥，回车
-
 wrangler secret put JWT_REFRESH_SECRET
-# 输入你的密钥，回车
-
 wrangler secret put ALLOWED_EMAILS
-# 输入允许注册的邮箱，回车
+wrangler secret put TWO_FACTOR_ENC_KEY
 ```
 
-### 6. 部署项目
+- JWT_SECRET：访问令牌签名密钥
+- JWT_REFRESH_SECRET：刷新令牌签名密钥
+- ALLOWED_EMAILS：首个账号注册白名单（仅在“数据库还没有任何用户”时启用），多个邮箱用英文逗号分隔
+- TWO_FACTOR_ENC_KEY：可选，Base64 的 32 字节密钥；用于加密存储 TOTP 秘钥（不设置则以 `plain:` 形式存储）
+
+### 4. 部署
 
 ```bash
 wrangler deploy
 ```
 
-部署成功后，Wrangler 会输出你的 Worker 访问地址（例如 `https://warden-worker.你的子域名.workers.dev` 或你配置的自定义域名）。
+部署后，把 Workers URL 或自定义域名（例如 `https://warden.2x.nz`）填入 Bitwarden 客户端的“自托管服务器 URL”。
 
-## 💻 客户端配置
+## 客户端使用建议
 
-1. 下载并安装官方 Bitwarden 客户端（浏览器插件、手机 App 或桌面程序）。
-2. 在登录界面的左上角或设置中，找到 **"自托管环境" (Self-hosted environment)** 设置。
-3. 在 **"服务器 URL" (Server URL)** 字段中，输入你部署的 Worker 地址（例如 `https://warden.2x.nz`）。
-4. 保存设置。
-5. 点击 **"创建账号" (Create Account)**。
-   - **注意**：注册的邮箱必须在 `ALLOWED_EMAILS` 环境变量配置的白名单中。
-6. 注册完成后登录即可开始使用。
+- 官方安卓如果之前指向过其它自托管地址，建议“删除账号/清缓存后重新添加服务器”，避免 remember token 跨服务端复用导致登录失败。
+- 首次启用 TOTP 后，建议在同一台设备上完成一次“输入 TOTP 登录”，后续官方安卓会自动走 remember-device（provider=5）。
 
-## 🛠️ 本地开发
+## 已实现的关键接口（部分）
 
-如果你想在本地运行和调试：
+- 配置与探测：`GET /api/config`、`GET /api/alive`、`GET /api/now`、`GET /api/version`
+- 登录：`POST /identity/accounts/prelogin`、`POST /identity/connect/token`
+- 同步：`GET /api/sync`
+- 密码项：`POST /api/ciphers/create`、`PUT /api/ciphers/{id}`、`PUT /api/ciphers/{id}/delete`
+- 文件夹：`POST /api/folders`、`PUT /api/folders/{id}`、`DELETE /api/folders/{id}`
+- 2FA：`GET /api/two-factor`、`/api/two-factor/authenticator/*`
+- 官方安卓设备探测：`GET /api/devices/knowndevice`
 
-1. **初始化本地数据库**：
-   ```bash
-   wrangler d1 execute vault1 --local --file=sql/schema.sql
-   ```
+## 本地开发
 
-2. **配置本地环境变量**：
-   创建 `.dev.vars` 文件：
-   ```env
-   JWT_SECRET="local_dev_secret"
-   JWT_REFRESH_SECRET="local_dev_refresh_secret"
-   ALLOWED_EMAILS="test@example.com"
-   ```
+```bash
+wrangler d1 execute vault1 --local --file=sql/schema_full.sql
+wrangler dev
+```
 
-3. **启动本地服务器**：
-   ```bash
-   wrangler dev
-   ```
+本地可用 `.dev.vars`（Wrangler 支持）注入 secrets。
 
-## 📝 待办事项 / 已知限制
+## 许可证
 
-- 目前主要支持个人使用，组织分享功能尚未完善。
-- 邮件发送功能目前仅打印日志，未对接实际邮件服务（注册验证主要依赖白名单机制）。
-- 部分高级 Bitwarden 功能（如 Bitwarden Send）尚未实现。
-
-## 🤝 贡献
-
-欢迎提交 Issue 反馈 bug 或 提交 Pull Request 改进代码！
-
-## 📄 许可证
-
-本项目基于 MIT 许可证开源。
+MIT
