@@ -1,31 +1,28 @@
 {
-  // Worker 基本信息
-  "name": "warden-worker",
-  "main": "build/index.js",
-  "compatibility_date": "2025-09-19",
-
-
-  // D1 数据库绑定（必须完整，否则会被认为是新建/覆盖）
-  "d1_databases": [
-    {
-      "binding": "vault1",
-      "database_id": "91d6795d-e822-4ca9-aa15-b327765bf3a9"
-      // database_name 可选，但建议写上以增强可读性
-      // "database_name": "vault1"
-    }
-  ],
-
-  "observability": {
-    "logs": {
-      "enabled": true,
-      "head_sampling_rate": 1,
-      "invocation_logs": true,
-      "persist": true
-    }
-  },
-
-  // 构建配置（等价于 [build]）
-  "build": {
-    "command": "worker-build --release"
-  }
+	// Worker 基本信息
+	"name": "warden-worker-mima",
+	"main": "build/index.js",
+	"compatibility_date": "2025-09-19",
+	"account_id": "215094cedb05ffdbd8183c898d6fe2d0",
+	// D1 数据库绑定（必须完整，否则会被认为是新建/覆盖）
+	"d1_databases": [
+		{
+			"binding": "warden-mima",
+			"database_id": "3fbde8b0-39ec-4de2-b451-ee42298274b0",
+			// database_name 可选，但建议写上以增强可读性,
+		    "database_name": "warden-mima"
+		}
+	],
+	"observability": {
+		"logs": {
+			"enabled": true,
+			"head_sampling_rate": 1,
+			"invocation_logs": true,
+			"persist": true
+		}
+	},
+	// 构建配置（等价于 [build]）
+	"build": {
+		"command": "worker-build --release"
+	}
 }
