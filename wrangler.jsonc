@@ -8,9 +8,9 @@
 	"d1_databases": [
 		{
 			"binding": "warden-mima",
-			"database_id": "3fbde8b0-39ec-4de2-b451-ee42298274b0",
+			"database_id": "3fbde8b0-39ec-4de2-b321-ee42298274b0",
 			// database_name 可选，但建议写上以增强可读性,
-		    "database_name": "warden-mima"
+		    // "database_name": "warden-mima"
 		}
 	],
 	"observability": {
