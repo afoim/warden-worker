@@ -52,7 +52,7 @@ wrangler secret put TWO_FACTOR_ENC_KEY
 
 - JWT_SECRET：访问令牌签名密钥
 - JWT_REFRESH_SECRET：刷新令牌签名密钥
-- ALLOWED_EMAILS：首个账号注册白名单（仅在“数据库还没有任何用户”时启用），多个邮箱用英文逗号分隔
+- ALLOWED_EMAILS：注册白名单，多个邮箱用英文逗号分隔；可使用 `*` 表示允许所有邮箱注册
 - TWO_FACTOR_ENC_KEY：可选，Base64 的 32 字节密钥；用于加密存储 TOTP 秘钥（不设置则以 `plain:` 形式存储）
 
 ### 4. 部署

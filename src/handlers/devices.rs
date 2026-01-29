@@ -23,7 +23,7 @@ async fn ensure_devices_table(db: &worker::D1Database) -> Result<(), AppError> {
     )
     .run()
     .await
-    .map_err(|_| AppError::Database)?;
+    .map_err(|e| AppError::Database(e.to_string()))?;
 
     let _ = db
         .prepare("ALTER TABLE devices ADD COLUMN remember_token_hash TEXT")
@@ -63,7 +63,7 @@ pub async fn knowndevice(
         .bind(&[email.into()])?
         .first(Some("id"))
         .await
-        .map_err(|_| AppError::Database)?;
+        .map_err(|e| AppError::Database(e.to_string()))?;
 
     let Some(user_id) = user_id else {
         return Ok(Json(json!(false)));
@@ -74,7 +74,7 @@ pub async fn knowndevice(
         .bind(&[user_id.into(), device_identifier.into()])?
         .first(Some("ok"))
         .await
-        .map_err(|_| AppError::Database)?;
+        .map_err(|e| AppError::Database(e.to_string()))?;
 
     Ok(Json(json!(exists.is_some())))
 }

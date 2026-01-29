@@ -29,6 +29,10 @@ pub struct ChangeMasterPasswordRequest {
     pub kdf: Option<i32>,
     #[serde(default)]
     pub kdf_iterations: Option<i32>,
+    #[serde(default)]
+    pub kdf_memory: Option<i32>,
+    #[serde(default)]
+    pub kdf_parallelism: Option<i32>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -42,6 +46,10 @@ pub struct ChangeEmailRequest {
     pub kdf: Option<i32>,
     #[serde(default)]
     pub kdf_iterations: Option<i32>,
+    #[serde(default)]
+    pub kdf_memory: Option<i32>,
+    #[serde(default)]
+    pub kdf_parallelism: Option<i32>,
 }
 
 #[worker::send]
@@ -56,7 +64,7 @@ pub async fn profile(
         "SELECT * FROM users WHERE id = ?1",
         claims.sub
     )
-    .map_err(|_| AppError::Database)?
+    .map_err(|e| AppError::Database(e.to_string()))?
     .first(None)
     .await?
     .ok_or(AppError::NotFound("User not found".to_string()))?;
@@ -96,19 +104,40 @@ pub async fn prelogin(
         .ok_or_else(|| AppError::BadRequest("Missing email".to_string()))?;
     let db = db::get_db(&env)?;
 
-    let stmt = db.prepare("SELECT kdf_iterations FROM users WHERE email = ?1");
+    let stmt = db.prepare("SELECT kdf_type, kdf_iterations, kdf_memory, kdf_parallelism FROM users WHERE email = ?1");
     let query = stmt.bind(&[email.into()])?;
-    let kdf_iterations: Option<i32> = query
-        .first(Some("kdf_iterations"))
+    let user_kdf: Option<Value> = query
+        .first(None)
         .await
-        .map_err(|_| AppError::Database)?;
+        .map_err(|e| AppError::Database(e.to_string()))?;
 
-    Ok(Json(PreloginResponse {
-        kdf: 0, // PBKDF2
-        kdf_iterations: kdf_iterations.unwrap_or(600_000),
-        kdf_memory: None,
-        kdf_parallelism: None,
-    }))
+    if let Some(user) = user_kdf {
+        let kdf_type = user.get("kdf_type").and_then(|v| v.as_i64()).unwrap_or(0) as i32;
+        let kdf_iterations = user.get("kdf_iterations").and_then(|v| v.as_i64()).unwrap_or(600_000) as i32;
+        let mut kdf_memory = user.get("kdf_memory").and_then(|v| v.as_i64()).map(|v| v as i32);
+        let mut kdf_parallelism = user.get("kdf_parallelism").and_then(|v| v.as_i64()).map(|v| v as i32);
+
+        // Fallback for Argon2id if values are missing (legacy users)
+        if kdf_type == 1 {
+            if kdf_memory.is_none() { kdf_memory = Some(64 * 1024); }
+            if kdf_parallelism.is_none() { kdf_parallelism = Some(4); }
+        }
+
+        Ok(Json(PreloginResponse {
+            kdf: kdf_type,
+            kdf_iterations,
+            kdf_memory,
+            kdf_parallelism,
+        }))
+    } else {
+        // User not found, return default (PBKDF2) to prevent user enumeration
+        Ok(Json(PreloginResponse {
+            kdf: 0,
+            kdf_iterations: 600_000,
+            kdf_memory: None,
+            kdf_parallelism: None,
+        }))
+    }
 }
 
 #[worker::send]
@@ -117,32 +146,48 @@ pub async fn register(
     Json(payload): Json<RegisterRequest>,
 ) -> Result<Json<Value>, AppError> {
     let db = db::get_db(&env)?;
-    let user_count: Option<i64> = db
-        .prepare("SELECT COUNT(1) AS user_count FROM users")
-        .first(Some("user_count"))
-        .await
-        .map_err(|_| AppError::Database)?;
-    let user_count = user_count.unwrap_or(0);
-    if user_count == 0 {
-        let allowed_emails = env
-            .secret("ALLOWED_EMAILS")
-            .map_err(|_| AppError::Internal)?;
-        let allowed_emails = allowed_emails
-            .as_ref()
-            .as_string()
-            .ok_or_else(|| AppError::Internal)?;
-        if allowed_emails
-            .split(",")
-            .all(|email| email.trim() != payload.email)
-        {
-            return Err(AppError::Unauthorized("Not allowed to signup".to_string()));
-        }
+    
+    // 1. 验证邮箱白名单
+    let allowed_emails = env
+        .secret("ALLOWED_EMAILS")
+        .map_err(|e| {
+            log::error!("Failed to read ALLOWED_EMAILS secret: {:?}", e);
+            AppError::Internal("Configuration error".to_string())
+        })?;
+    let allowed_emails = allowed_emails
+        .as_ref()
+        .as_string()
+        .ok_or_else(|| AppError::Internal("Invalid ALLOWED_EMAILS format".to_string()))?;
+        
+    let email = payload.email.to_lowercase();
+    let allowed = allowed_emails
+        .split(',')
+        .map(|s| s.trim().to_lowercase())
+        .any(|s| s == "*" || s == email);
+        
+    if !allowed {
+        log::warn!("📧 Registration attempt with unauthorized email: {}", email);
+        return Err(AppError::Unauthorized("Not allowed to signup".to_string()));
     }
+
+    // 2. 检查邮箱是否已存在 (主动检查,避免依赖数据库错误)
+    let existing: Option<String> = db
+        .prepare("SELECT id FROM users WHERE email = ?1")
+        .bind(&[email.clone().into()])?
+        .first(Some("id"))
+        .await
+        .map_err(|e| db::handle_db_error(e))?;
+        
+    if existing.is_some() {
+        log::info!("📧 Email already registered: {}", email);
+        return Err(AppError::BadRequest("Email already registered".to_string()));
+    }
+
     let now = Utc::now().to_rfc3339();
     let user = User {
         id: Uuid::new_v4().to_string(),
         name: payload.name,
-        email: payload.email.to_lowercase(),
+        email: email.clone(),
         email_verified: false,
         master_password_hash: payload.master_password_hash,
         master_password_hint: payload.master_password_hint,
@@ -151,15 +196,17 @@ pub async fn register(
         public_key: payload.user_asymmetric_keys.public_key,
         kdf_type: payload.kdf,
         kdf_iterations: payload.kdf_iterations,
+        kdf_memory: payload.kdf_memory,
+        kdf_parallelism: payload.kdf_parallelism,
         security_stamp: Uuid::new_v4().to_string(),
         created_at: now.clone(),
         updated_at: now,
     };
 
-    let query = query!(
+    query!(
         &db,
-        "INSERT INTO users (id, name, email, master_password_hash, key, private_key, public_key, kdf_iterations, security_stamp, created_at, updated_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+        "INSERT INTO users (id, name, email, master_password_hash, key, private_key, public_key, kdf_iterations, security_stamp, created_at, updated_at, kdf_type, kdf_memory, kdf_parallelism)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
          user.id,
          user.name,
          user.email,
@@ -170,16 +217,17 @@ pub async fn register(
          user.kdf_iterations,
          user.security_stamp,
          user.created_at,
-         user.updated_at
-    ).map_err(|error|{
-        AppError::Database
-    })?
+         user.updated_at,
+         user.kdf_type,
+         user.kdf_memory,
+         user.kdf_parallelism
+    )
+    .map_err(|e| db::handle_db_error(e))?
     .run()
     .await
-    .map_err(|error|{
-        AppError::Database
-    })?;
+    .map_err(|e| db::handle_db_error(e))?;
 
+    log::info!("✅ User registered successfully: {} ({})", user.email, user.id);
     Ok(Json(json!({})))
 }
 
@@ -202,9 +250,9 @@ pub async fn change_master_password(
         .bind(&[claims.sub.clone().into()])?
         .first(None)
         .await
-        .map_err(|_| AppError::Database)?
+        .map_err(|e| AppError::Database(e.to_string()))?
         .ok_or_else(|| AppError::NotFound("User not found".to_string()))?;
-    let user: User = serde_json::from_value(user).map_err(|_| AppError::Internal)?;
+    let user: User = serde_json::from_value(user).map_err(|e| AppError::Internal(e.to_string()))?;
 
     if !constant_time_eq(
         user.master_password_hash.as_bytes(),
@@ -228,9 +276,11 @@ pub async fn change_master_password(
         .unwrap_or_else(|| user.public_key.clone());
     let kdf_type = payload.kdf.unwrap_or(user.kdf_type);
     let kdf_iterations = payload.kdf_iterations.unwrap_or(user.kdf_iterations);
+    let kdf_memory = payload.kdf_memory.or(user.kdf_memory);
+    let kdf_parallelism = payload.kdf_parallelism.or(user.kdf_parallelism);
 
     db.prepare(
-        "UPDATE users SET master_password_hash = ?1, master_password_hint = ?2, key = ?3, private_key = ?4, public_key = ?5, kdf_type = ?6, kdf_iterations = ?7, security_stamp = ?8, updated_at = ?9 WHERE id = ?10",
+        "UPDATE users SET master_password_hash = ?1, master_password_hint = ?2, key = ?3, private_key = ?4, public_key = ?5, kdf_type = ?6, kdf_iterations = ?7, security_stamp = ?8, updated_at = ?9, kdf_memory = ?10, kdf_parallelism = ?11 WHERE id = ?12",
     )
     .bind(&[
         payload.new_master_password_hash.into(),
@@ -242,11 +292,13 @@ pub async fn change_master_password(
         kdf_iterations.into(),
         security_stamp.into(),
         now.into(),
+        to_js_val(kdf_memory),
+        to_js_val(kdf_parallelism),
         claims.sub.into(),
     ])?
     .run()
     .await
-    .map_err(|_| AppError::Database)?;
+    .map_err(|e| AppError::Database(e.to_string()))?;
 
     Ok(Json(json!({})))
 }
@@ -275,9 +327,9 @@ pub async fn change_email(
         .bind(&[claims.sub.clone().into()])?
         .first(None)
         .await
-        .map_err(|_| AppError::Database)?
+        .map_err(|e| AppError::Database(e.to_string()))?
         .ok_or_else(|| AppError::NotFound("User not found".to_string()))?;
-    let user: User = serde_json::from_value(user).map_err(|_| AppError::Internal)?;
+    let user: User = serde_json::from_value(user).map_err(|e| AppError::Internal(e.to_string()))?;
 
     if !constant_time_eq(
         user.master_password_hash.as_bytes(),
@@ -290,9 +342,11 @@ pub async fn change_email(
     let security_stamp = Uuid::new_v4().to_string();
     let kdf_type = payload.kdf.unwrap_or(user.kdf_type);
     let kdf_iterations = payload.kdf_iterations.unwrap_or(user.kdf_iterations);
+    let kdf_memory = payload.kdf_memory.or(user.kdf_memory);
+    let kdf_parallelism = payload.kdf_parallelism.or(user.kdf_parallelism);
 
     db.prepare(
-        "UPDATE users SET email = ?1, email_verified = ?2, master_password_hash = ?3, key = ?4, kdf_type = ?5, kdf_iterations = ?6, security_stamp = ?7, updated_at = ?8 WHERE id = ?9",
+        "UPDATE users SET email = ?1, email_verified = ?2, master_password_hash = ?3, key = ?4, kdf_type = ?5, kdf_iterations = ?6, security_stamp = ?7, updated_at = ?8, kdf_memory = ?9, kdf_parallelism = ?10 WHERE id = ?11",
     )
     .bind(&[
         new_email.into(),
@@ -303,15 +357,18 @@ pub async fn change_email(
         kdf_iterations.into(),
         security_stamp.into(),
         now.into(),
+        to_js_val(kdf_memory),
+        to_js_val(kdf_parallelism),
         claims.sub.into(),
     ])?
     .run()
     .await
     .map_err(|e| {
-        if e.to_string().contains("UNIQUE") {
+        let error_str = e.to_string();
+        if error_str.contains("UNIQUE") {
             AppError::BadRequest("Email already in use".to_string())
         } else {
-            AppError::Database
+            AppError::Database(error_str)
         }
     })?;
 

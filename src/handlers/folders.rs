@@ -37,7 +37,7 @@ pub async fn create_folder(
         folder.created_at,
         folder.updated_at
     )
-    .map_err(|_| AppError::Database)?
+    .map_err(|e| AppError::Database(e.to_string()))?
     .run()
     .await?;
 
@@ -65,7 +65,7 @@ pub async fn delete_folder(
         id,
         claims.sub
     )
-    .map_err(|_| AppError::Database)?
+    .map_err(|e| AppError::Database(e.to_string()))?
     .run()
     .await?;
 
@@ -88,7 +88,7 @@ pub async fn update_folder(
         id,
         claims.sub
     )
-    .map_err(|_| AppError::Database)?
+    .map_err(|e| AppError::Database(e.to_string()))?
     .first(None)
     .await?
     .ok_or(AppError::NotFound("Folder not found".to_string()))?;
@@ -109,7 +109,7 @@ pub async fn update_folder(
         folder.id,
         folder.user_id
     )
-    .map_err(|_| AppError::Database)?
+    .map_err(|e| AppError::Database(e.to_string()))?
     .run()
     .await?;
 
