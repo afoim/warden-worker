@@ -103,14 +103,17 @@ fn generate_tokens_and_response(
         &EncodingKey::from_secret(jwt_refresh_secret.as_ref()),
     )?;
 
-    Ok(json!({
+    let kdf_memory = user.kdf_memory.or_else(|| if user.kdf_type == 1 { Some(64 * 1024) } else { None });
+    let kdf_parallelism = user.kdf_parallelism.or_else(|| if user.kdf_type == 1 { Some(4) } else { None });
+
+    let response = json!({
         "ForcePasswordReset": false,
         "Kdf": user.kdf_type,
         "KdfIterations": user.kdf_iterations,
-        "KdfMemory": null,
-        "KdfParallelism": null,
+        "KdfMemory": kdf_memory,
+        "KdfParallelism": kdf_parallelism,
         "Key": user.key,
-        "MasterPasswordPolicy": { "Object": "masterPasswordPolicy" },
+        "MasterPasswordPolicy": { "Object": "masterPasswordPolicy", "object": "masterPasswordPolicy" },
         "PrivateKey": user.private_key,
         "ResetMasterPassword": false,
         "UserDecryptionOptions": {
@@ -119,29 +122,35 @@ fn generate_tokens_and_response(
                 "Kdf": {
                     "KdfType": user.kdf_type,
                     "Iterations": user.kdf_iterations,
-                    "Memory": null,
-                    "Parallelism": null
+                    "Memory": kdf_memory,
+                    "Parallelism": kdf_parallelism
                 },
                 "MasterKeyEncryptedUserKey": user.key,
                 "MasterKeyWrappedUserKey": user.key,
                 "Salt": user.email
             },
-            "Object": "userDecryptionOptions"
+            "Object": "userDecryptionOptions",
+            "object": "userDecryptionOptions"
         },
         "AccountKeys": {
             "publicKeyEncryptionKeyPair": {
                 "wrappedPrivateKey": user.private_key,
                 "publicKey": user.public_key,
-                "Object": "publicKeyEncryptionKeyPair"
+                "Object": "publicKeyEncryptionKeyPair",
+                "object": "publicKeyEncryptionKeyPair"
             },
-            "Object": "privateKeys"
+            "Object": "privateKeys",
+            "object": "privateKeys"
         },
         "access_token": access_token,
         "expires_in": expires_in.num_seconds(),
         "refresh_token": refresh_token,
         "scope": "api offline_access",
         "token_type": "Bearer"
-    }))
+    });
+
+    log::info!("🔑 Generated token response for user {}: {}", user.id, response);
+    Ok(response)
 }
 
 async fn ensure_devices_table(db: &worker::D1Database) -> Result<(), AppError> {
@@ -311,7 +320,7 @@ pub async fn token(
                 .bind(&[username.to_lowercase().into()])?
                 .first(None)
                 .await
-                .map_err(|_| AppError::Unauthorized("Invalid credentials".to_string()))?
+                .map_err(|e| AppError::Database(e.to_string()))?
                 .ok_or_else(|| AppError::Unauthorized("Invalid credentials".to_string()))?;
             let user: User = serde_json::from_value(user).map_err(|e| AppError::Internal(e.to_string()))?;
             // Securely compare the provided hash with the stored hash
