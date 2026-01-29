@@ -72,6 +72,12 @@ CREATE TABLE IF NOT EXISTS devices (
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 );
 
+CREATE TABLE IF NOT EXISTS login_rate_limits (
+    key TEXT PRIMARY KEY NOT NULL,
+    count INTEGER NOT NULL,
+    reset_at INTEGER NOT NULL
+);
+
 CREATE INDEX IF NOT EXISTS idx_ciphers_user_id ON ciphers(user_id);
 CREATE INDEX IF NOT EXISTS idx_ciphers_folder_id ON ciphers(folder_id);
 CREATE INDEX IF NOT EXISTS idx_folders_user_id ON folders(user_id);
