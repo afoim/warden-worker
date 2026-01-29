@@ -65,7 +65,7 @@ pub async fn get_sync_data(
         .collect::<Vec<Cipher>>();
 
     let time = chrono::DateTime::parse_from_rfc3339(&user.created_at)
-        .map_err(|_| AppError::Internal)?
+        .map_err(|e| AppError::Internal(e.to_string()))?
         .to_rfc3339_opts(chrono::SecondsFormat::Micros, true);
     let profile = Profile {
         id: user.id,

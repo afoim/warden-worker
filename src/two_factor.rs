@@ -24,7 +24,7 @@ pub async fn ensure_two_factor_authenticator_table(db: &D1Database) -> Result<()
     )
     .run()
     .await
-    .map_err(|_| AppError::Database)?;
+    .map_err(|e| AppError::Database(e.to_string()))?;
     Ok(())
 }
 
@@ -35,7 +35,7 @@ pub async fn is_authenticator_enabled(db: &D1Database, user_id: &str) -> Result<
         .bind(&[user_id.into()])?
         .first(Some("enabled"))
         .await
-        .map_err(|_| AppError::Database)?;
+        .map_err(|e| AppError::Database(e.to_string()))?;
     Ok(matches!(enabled, Some(1)))
 }
 
@@ -49,7 +49,7 @@ pub async fn get_authenticator_secret_enc(
         .bind(&[user_id.into()])?
         .first(Some("secret_enc"))
         .await
-        .map_err(|_| AppError::Database)?;
+        .map_err(|e| AppError::Database(e.to_string()))?;
     Ok(secret_enc)
 }
 
@@ -75,7 +75,7 @@ pub async fn upsert_authenticator_secret(
     ])?
     .run()
     .await
-    .map_err(|_| AppError::Database)?;
+    .map_err(|e| AppError::Database(e.to_string()))?;
     Ok(())
 }
 
@@ -85,7 +85,7 @@ pub async fn disable_authenticator(db: &D1Database, user_id: &str) -> Result<(),
         .bind(&[user_id.into()])?
         .run()
         .await
-        .map_err(|_| AppError::Database)?;
+        .map_err(|e| AppError::Database(e.to_string()))?;
     Ok(())
 }
 
@@ -118,7 +118,7 @@ pub fn encrypt_secret_with_optional_key(
                 aad: user_id.as_bytes(),
             },
         )
-        .map_err(|_| AppError::Internal)?;
+        .map_err(|e| AppError::Internal(e.to_string()))?;
 
     let mut blob = Vec::with_capacity(nonce_bytes.len() + ct.len());
     blob.extend_from_slice(&nonce_bytes);
@@ -135,7 +135,7 @@ pub fn decrypt_secret_with_optional_key(
         return Ok(rest.to_string());
     }
     let Some(rest) = secret_enc.strip_prefix("gcm:") else {
-        return Err(AppError::Internal);
+        return Err(AppError::Internal("Invalid secret prefix".to_string()));
     };
     let Some(key_b64) = two_factor_enc_key_b64 else {
         return Err(AppError::BadRequest("Missing TWO_FACTOR_ENC_KEY".to_string()));
@@ -150,9 +150,9 @@ pub fn decrypt_secret_with_optional_key(
 
     let blob = general_purpose::STANDARD
         .decode(rest)
-        .map_err(|_| AppError::Internal)?;
+        .map_err(|e| AppError::Internal(e.to_string()))?;
     if blob.len() < 12 {
-        return Err(AppError::Internal);
+        return Err(AppError::Internal("Invalid secret blob length".to_string()));
     }
     let (nonce_bytes, ct) = blob.split_at(12);
     let cipher = Aes256Gcm::new(Key::<Aes256Gcm>::from_slice(&key_bytes));
@@ -171,7 +171,7 @@ pub fn decrypt_secret_with_optional_key(
             )
         })?;
 
-    Ok(String::from_utf8(pt).map_err(|_| AppError::Internal)?)
+    Ok(String::from_utf8(pt).map_err(|e| AppError::Internal(e.to_string()))?)
 }
 
 pub fn verify_totp_code(secret_encoded: &str, token: &str) -> Result<bool, AppError> {
@@ -186,11 +186,11 @@ pub fn verify_totp_code(secret_encoded: &str, token: &str) -> Result<bool, AppEr
         6,
         1,
         30,
-        secret.to_bytes().map_err(|_| AppError::Internal)?,
+        secret.to_bytes().map_err(|e| AppError::Internal(e.to_string()))?,
         None,
         "".to_string(),
     )
-    .map_err(|_| AppError::Internal)?;
+    .map_err(|e| AppError::Internal(e.to_string()))?;
     let unix_seconds = (Date::now() / 1000.0).floor() as u64;
     Ok(totp.check(token, unix_seconds))
 }

@@ -56,7 +56,7 @@ pub async fn profile(
         "SELECT * FROM users WHERE id = ?1",
         claims.sub
     )
-    .map_err(|_| AppError::Database)?
+    .map_err(|e| AppError::Database(e.to_string()))?
     .first(None)
     .await?
     .ok_or(AppError::NotFound("User not found".to_string()))?;
@@ -101,7 +101,7 @@ pub async fn prelogin(
     let kdf_iterations: Option<i32> = query
         .first(Some("kdf_iterations"))
         .await
-        .map_err(|_| AppError::Database)?;
+        .map_err(|e| AppError::Database(e.to_string()))?;
 
     Ok(Json(PreloginResponse {
         kdf: 0, // PBKDF2
@@ -117,32 +117,48 @@ pub async fn register(
     Json(payload): Json<RegisterRequest>,
 ) -> Result<Json<Value>, AppError> {
     let db = db::get_db(&env)?;
-    let user_count: Option<i64> = db
-        .prepare("SELECT COUNT(1) AS user_count FROM users")
-        .first(Some("user_count"))
-        .await
-        .map_err(|_| AppError::Database)?;
-    let user_count = user_count.unwrap_or(0);
-    if user_count == 0 {
-        let allowed_emails = env
-            .secret("ALLOWED_EMAILS")
-            .map_err(|_| AppError::Internal)?;
-        let allowed_emails = allowed_emails
-            .as_ref()
-            .as_string()
-            .ok_or_else(|| AppError::Internal)?;
-        if allowed_emails
-            .split(",")
-            .all(|email| email.trim() != payload.email)
-        {
-            return Err(AppError::Unauthorized("Not allowed to signup".to_string()));
-        }
+    
+    // 1. 验证邮箱白名单
+    let allowed_emails = env
+        .secret("ALLOWED_EMAILS")
+        .map_err(|e| {
+            log::error!("Failed to read ALLOWED_EMAILS secret: {:?}", e);
+            AppError::Internal("Configuration error".to_string())
+        })?;
+    let allowed_emails = allowed_emails
+        .as_ref()
+        .as_string()
+        .ok_or_else(|| AppError::Internal("Invalid ALLOWED_EMAILS format".to_string()))?;
+        
+    let email = payload.email.to_lowercase();
+    let allowed = allowed_emails
+        .split(',')
+        .map(|s| s.trim().to_lowercase())
+        .any(|s| s == "*" || s == email);
+        
+    if !allowed {
+        log::warn!("📧 Registration attempt with unauthorized email: {}", email);
+        return Err(AppError::Unauthorized("Not allowed to signup".to_string()));
     }
+
+    // 2. 检查邮箱是否已存在 (主动检查,避免依赖数据库错误)
+    let existing: Option<String> = db
+        .prepare("SELECT id FROM users WHERE email = ?1")
+        .bind(&[email.clone().into()])?
+        .first(Some("id"))
+        .await
+        .map_err(|e| db::handle_db_error(e))?;
+        
+    if existing.is_some() {
+        log::info!("📧 Email already registered: {}", email);
+        return Err(AppError::BadRequest("Email already registered".to_string()));
+    }
+
     let now = Utc::now().to_rfc3339();
     let user = User {
         id: Uuid::new_v4().to_string(),
         name: payload.name,
-        email: payload.email.to_lowercase(),
+        email: email.clone(),
         email_verified: false,
         master_password_hash: payload.master_password_hash,
         master_password_hint: payload.master_password_hint,
@@ -156,7 +172,7 @@ pub async fn register(
         updated_at: now,
     };
 
-    let query = query!(
+    query!(
         &db,
         "INSERT INTO users (id, name, email, master_password_hash, key, private_key, public_key, kdf_iterations, security_stamp, created_at, updated_at)
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
@@ -171,15 +187,13 @@ pub async fn register(
          user.security_stamp,
          user.created_at,
          user.updated_at
-    ).map_err(|error|{
-        AppError::Database
-    })?
+    )
+    .map_err(|e| db::handle_db_error(e))?
     .run()
     .await
-    .map_err(|error|{
-        AppError::Database
-    })?;
+    .map_err(|e| db::handle_db_error(e))?;
 
+    log::info!("✅ User registered successfully: {} ({})", user.email, user.id);
     Ok(Json(json!({})))
 }
 
@@ -202,9 +216,9 @@ pub async fn change_master_password(
         .bind(&[claims.sub.clone().into()])?
         .first(None)
         .await
-        .map_err(|_| AppError::Database)?
+        .map_err(|e| AppError::Database(e.to_string()))?
         .ok_or_else(|| AppError::NotFound("User not found".to_string()))?;
-    let user: User = serde_json::from_value(user).map_err(|_| AppError::Internal)?;
+    let user: User = serde_json::from_value(user).map_err(|e| AppError::Internal(e.to_string()))?;
 
     if !constant_time_eq(
         user.master_password_hash.as_bytes(),
@@ -246,7 +260,7 @@ pub async fn change_master_password(
     ])?
     .run()
     .await
-    .map_err(|_| AppError::Database)?;
+    .map_err(|e| AppError::Database(e.to_string()))?;
 
     Ok(Json(json!({})))
 }
@@ -275,9 +289,9 @@ pub async fn change_email(
         .bind(&[claims.sub.clone().into()])?
         .first(None)
         .await
-        .map_err(|_| AppError::Database)?
+        .map_err(|e| AppError::Database(e.to_string()))?
         .ok_or_else(|| AppError::NotFound("User not found".to_string()))?;
-    let user: User = serde_json::from_value(user).map_err(|_| AppError::Internal)?;
+    let user: User = serde_json::from_value(user).map_err(|e| AppError::Internal(e.to_string()))?;
 
     if !constant_time_eq(
         user.master_password_hash.as_bytes(),
@@ -308,10 +322,11 @@ pub async fn change_email(
     .run()
     .await
     .map_err(|e| {
-        if e.to_string().contains("UNIQUE") {
+        let error_str = e.to_string();
+        if error_str.contains("UNIQUE") {
             AppError::BadRequest("Email already in use".to_string())
         } else {
-            AppError::Database
+            AppError::Database(error_str)
         }
     })?;
 

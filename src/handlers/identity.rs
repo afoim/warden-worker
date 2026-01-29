@@ -1,4 +1,4 @@
-use axum::{extract::State, response::IntoResponse, Form, Json};
+use axum::{extract::State, http::HeaderMap, response::IntoResponse, Form, Json};
 use axum::http::StatusCode;
 use axum::response::Response;
 use chrono::{Duration, Utc};
@@ -161,12 +161,87 @@ async fn ensure_devices_table(db: &worker::D1Database) -> Result<(), AppError> {
     )
     .run()
     .await
-    .map_err(|_| AppError::Database)?;
+    .map_err(|e| AppError::Database(e.to_string()))?;
 
     let _ = db
         .prepare("ALTER TABLE devices ADD COLUMN remember_token_hash TEXT")
         .run()
         .await;
+
+    Ok(())
+}
+
+async fn ensure_login_rate_limits_table(db: &worker::D1Database) -> Result<(), AppError> {
+    db.prepare(
+        "CREATE TABLE IF NOT EXISTS login_rate_limits (
+            key TEXT PRIMARY KEY NOT NULL,
+            count INTEGER NOT NULL,
+            reset_at INTEGER NOT NULL
+        )",
+    )
+    .run()
+    .await
+    .map_err(|e| AppError::Database(e.to_string()))?;
+    Ok(())
+}
+
+fn client_ip(headers: &HeaderMap) -> String {
+    headers
+        .get("cf-connecting-ip")
+        .and_then(|v| v.to_str().ok())
+        .map(|s| s.to_string())
+        .or_else(|| {
+            headers
+                .get("x-forwarded-for")
+                .and_then(|v| v.to_str().ok())
+                .and_then(|s| s.split(',').next())
+                .map(|s| s.trim().to_string())
+        })
+        .unwrap_or_else(|| "unknown".to_string())
+}
+
+async fn enforce_login_rate_limit(db: &worker::D1Database, key: &str) -> Result<(), AppError> {
+    ensure_login_rate_limits_table(db).await?;
+    let now = Utc::now().timestamp_millis();
+    let window_ms: i64 = 5 * 60 * 1000;
+    let max_attempts: i64 = 30;
+
+    let row: Option<serde_json::Value> = db
+        .prepare("SELECT count, reset_at FROM login_rate_limits WHERE key = ?1")
+        .bind(&[key.into()])?
+        .first(None)
+        .await
+        .map_err(|e| AppError::Database(e.to_string()))?;
+
+    let (mut count, mut reset_at) = if let Some(row) = row {
+        let count = row.get("count").and_then(|v| v.as_i64()).unwrap_or(0);
+        let reset_at = row.get("reset_at").and_then(|v| v.as_i64()).unwrap_or(0);
+        (count, reset_at)
+    } else {
+        (0, 0)
+    };
+
+    if now >= reset_at {
+        count = 0;
+        reset_at = now + window_ms;
+    }
+
+    count += 1;
+
+    db.prepare(
+        "INSERT INTO login_rate_limits (key, count, reset_at) VALUES (?1, ?2, ?3)
+         ON CONFLICT(key) DO UPDATE SET count = excluded.count, reset_at = excluded.reset_at",
+    )
+    .bind(&[key.into(), (count as f64).into(), (reset_at as f64).into()])?
+    .run()
+    .await
+    .map_err(|e| AppError::Database(e.to_string()))?;
+
+    if count > max_attempts {
+        return Err(AppError::TooManyRequests(
+            "Too many login attempts. Please try again later.".to_string(),
+        ));
+    }
 
     Ok(())
 }
@@ -214,11 +289,16 @@ fn invalid_two_factor_response() -> Response {
 #[worker::send]
 pub async fn token(
     State(env): State<Arc<Env>>,
+    headers: HeaderMap,
     Form(payload): Form<TokenRequest>,
 ) -> Result<Response, AppError> {
     let db = db::get_db(&env)?;
     match payload.grant_type.as_str() {
         "password" => {
+            let ip = client_ip(&headers);
+            let rate_key = format!("login:{}", ip);
+            enforce_login_rate_limit(&db, &rate_key).await?;
+
             let username = payload
                 .username
                 .ok_or_else(|| AppError::BadRequest("Missing username".to_string()))?;
@@ -233,7 +313,7 @@ pub async fn token(
                 .await
                 .map_err(|_| AppError::Unauthorized("Invalid credentials".to_string()))?
                 .ok_or_else(|| AppError::Unauthorized("Invalid credentials".to_string()))?;
-            let user: User = serde_json::from_value(user).map_err(|_| AppError::Internal)?;
+            let user: User = serde_json::from_value(user).map_err(|e| AppError::Internal(e.to_string()))?;
             // Securely compare the provided hash with the stored hash
             if !constant_time_eq(
                 user.master_password_hash.as_bytes(),
@@ -264,7 +344,7 @@ pub async fn token(
                         .bind(&[user.id.clone().into(), device_identifier.into()])?
                         .first(None)
                         .await
-                        .map_err(|_| AppError::Database)?;
+                        .map_err(|e| AppError::Database(e.to_string()))?;
                     let stored_hash = row
                         .and_then(|v| v.get("remember_token_hash").cloned())
                         .and_then(|v| v.as_str().map(|s| s.to_string()));
@@ -282,7 +362,7 @@ pub async fn token(
 
                     let secret_enc = two_factor::get_authenticator_secret_enc(&db, &user.id)
                         .await?
-                        .ok_or_else(|| AppError::Internal)?;
+                        .ok_or_else(|| AppError::Internal("Missing authenticator secret".to_string()))?;
                     let two_factor_key_b64 =
                         env.secret("TWO_FACTOR_ENC_KEY").ok().map(|s| s.to_string());
                     let secret_encoded = two_factor::decrypt_secret_with_optional_key(
@@ -332,7 +412,7 @@ pub async fn token(
                         user_id.clone().into(),
                         device_identifier.into(),
                         device_name.clone().into(),
-                        device_type.map(|v| v as i64).into(),
+                        device_type.into(),
                         remember_hash.clone().into(),
                         now.clone().into(),
                         now.into(),
@@ -371,7 +451,7 @@ pub async fn token(
                 .await
                 .map_err(|_| AppError::Unauthorized("Invalid user".to_string()))?
                 .ok_or_else(|| AppError::Unauthorized("Invalid user".to_string()))?;
-            let user: User = serde_json::from_value(user).map_err(|_| AppError::Internal)?;
+            let user: User = serde_json::from_value(user).map_err(|e| AppError::Internal(e.to_string()))?;
 
             let response = generate_tokens_and_response(user, &env)?;
             Ok(Json(response).into_response())

@@ -54,7 +54,7 @@ pub async fn authenticator_request(
         .bind(&[claims.sub.clone().into()])?
         .first(Some("email"))
         .await
-        .map_err(|_| AppError::Database)?;
+        .map_err(|e| AppError::Database(e.to_string()))?;
     let user_email = user_email.ok_or_else(|| AppError::NotFound("User not found".to_string()))?;
 
     let secret = Secret::generate_secret();
@@ -82,13 +82,13 @@ pub async fn authenticator_request(
         30,
         Secret::Encoded(secret_encoded.clone())
             .to_bytes()
-            .map_err(|_| AppError::Internal)?,
+            .map_err(|e| AppError::Internal(e.to_string()))?,
         Some(issuer.clone()),
         account.clone(),
     )
-    .map_err(|_| AppError::Internal)?;
+    .map_err(|e| AppError::Internal(e.to_string()))?;
     let otpauth = totp.get_url();
-    let qr_base64 = totp.get_qr_base64().map_err(|_| AppError::Internal)?;
+    let qr_base64 = totp.get_qr_base64().map_err(|e| AppError::Internal(e.to_string()))?;
 
     Ok(Json(json!({
         "secret": secret_encoded,
