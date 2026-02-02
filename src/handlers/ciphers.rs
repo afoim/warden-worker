@@ -10,6 +10,28 @@ use crate::error::AppError;
 use crate::models::cipher::{Cipher, CipherData, CipherRequestData, CreateCipherRequest, CipherRequestFlat};
 use axum::extract::Path;
 
+async fn ensure_folder_owned_by_user(
+    db: &worker::D1Database,
+    user_id: &str,
+    folder_id: &str,
+) -> Result<(), AppError> {
+    let exists: Option<i64> = query!(
+        db,
+        "SELECT 1 AS ok FROM folders WHERE id = ?1 AND user_id = ?2 LIMIT 1",
+        folder_id,
+        user_id
+    )
+    .map_err(|_| AppError::Database)?
+    .first(Some("ok"))
+    .await
+    .map_err(|_| AppError::Database)?;
+
+    if exists.is_none() {
+        return Err(AppError::NotFound("Folder not found".to_string()));
+    }
+    Ok(())
+}
+
 async fn create_cipher_inner(
     claims: Claims,
     env: &Arc<Env>,
@@ -19,6 +41,10 @@ async fn create_cipher_inner(
     let db = db::get_db(env)?;
     let now = Utc::now();
     let now = now.format("%Y-%m-%dT%H:%M:%S%.3fZ").to_string();
+
+    if let Some(folder_id) = cipher_data_req.folder_id.as_deref() {
+        ensure_folder_owned_by_user(&db, &claims.sub, folder_id).await?;
+    }
 
     let cipher_data = CipherData {
         name: cipher_data_req.name,
@@ -119,6 +145,10 @@ pub async fn update_cipher(
     .ok_or(AppError::NotFound("Cipher not found".to_string()))?;
 
     let cipher_data_req = payload;
+
+    if let Some(folder_id) = cipher_data_req.folder_id.as_deref() {
+        ensure_folder_owned_by_user(&db, &claims.sub, folder_id).await?;
+    }
 
     let cipher_data = CipherData {
         name: cipher_data_req.name,

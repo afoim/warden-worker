@@ -24,12 +24,15 @@ pub async fn import_data(
     let now = Utc::now();
     let now = now.format("%Y-%m-%dT%H:%M:%S%.3fZ").to_string();
 
-    let folder_query = "INSERT OR IGNORE INTO folders (id, user_id, name, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5)";
+    let folder_query = "INSERT INTO folders (id, user_id, name, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5)";
+    let mut folder_id_map: std::collections::HashMap<String, String> = std::collections::HashMap::new();
 
     let mut folder_stmts: Vec<D1PreparedStatement> = Vec::new();
     for import_folder in &payload.folders {
+        let new_id = Uuid::new_v4().to_string();
+        folder_id_map.insert(import_folder.id.clone(), new_id.clone());
         let folder = Folder {
-            id: import_folder.id.clone(),
+            id: new_id,
             user_id: claims.sub.clone(),
             name: import_folder.name.clone(),
             created_at: now.clone(),
@@ -53,7 +56,7 @@ pub async fn import_data(
     for relationship in payload.folder_relationships {
         if let Some(cipher) = payload.ciphers.get_mut(relationship.key) {
             if let Some(folder) = payload.folders.get(relationship.value) {
-                cipher.folder_id = Some(folder.id.clone());
+                cipher.folder_id = folder_id_map.get(&folder.id).cloned();
             }
         }
     }
@@ -81,6 +84,9 @@ pub async fn import_data(
         let id = Uuid::new_v4().to_string();
         let user_id = claims.sub.clone();
         let data = serde_json::to_string(&cipher_data).map_err(|_| AppError::Internal)?;
+        let folder_id = import_cipher
+            .folder_id
+            .and_then(|id| folder_id_map.get(&id).cloned());
 
         cipher_stmts.push(db.prepare(cipher_query).bind(&[
             id.into(),
@@ -89,7 +95,7 @@ pub async fn import_data(
             import_cipher.r#type.into(),
             data.into(),
             import_cipher.favorite.into(),
-            to_js_val(import_cipher.folder_id),
+            to_js_val(folder_id),
             now.clone().into(),
             now.clone().into(),
         ])?);

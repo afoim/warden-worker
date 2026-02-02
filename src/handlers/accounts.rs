@@ -117,32 +117,27 @@ pub async fn register(
     Json(payload): Json<RegisterRequest>,
 ) -> Result<Json<Value>, AppError> {
     let db = db::get_db(&env)?;
-    let user_count: Option<i64> = db
-        .prepare("SELECT COUNT(1) AS user_count FROM users")
-        .first(Some("user_count"))
-        .await
-        .map_err(|_| AppError::Database)?;
-    let user_count = user_count.unwrap_or(0);
-    if user_count == 0 {
-        let allowed_emails = env
-            .secret("ALLOWED_EMAILS")
-            .map_err(|_| AppError::Internal)?;
-        let allowed_emails = allowed_emails
-            .as_ref()
-            .as_string()
-            .ok_or_else(|| AppError::Internal)?;
-        if allowed_emails
-            .split(",")
-            .all(|email| email.trim() != payload.email)
-        {
-            return Err(AppError::Unauthorized("Not allowed to signup".to_string()));
-        }
+    let allowed_emails = env
+        .secret("ALLOWED_EMAILS")
+        .map_err(|_| AppError::Unauthorized("Not allowed to signup".to_string()))?;
+    let allowed_emails = allowed_emails
+        .as_ref()
+        .as_string()
+        .ok_or_else(|| AppError::Internal)?;
+    let email = payload.email.to_lowercase();
+    let allowed = allowed_emails
+        .split(',')
+        .map(|s| s.trim().to_lowercase())
+        .any(|s| s == "*" || s == email);
+    if !allowed {
+        return Err(AppError::Unauthorized("Not allowed to signup".to_string()));
     }
+
     let now = Utc::now().to_rfc3339();
     let user = User {
         id: Uuid::new_v4().to_string(),
         name: payload.name,
-        email: payload.email.to_lowercase(),
+        email,
         email_verified: false,
         master_password_hash: payload.master_password_hash,
         master_password_hint: payload.master_password_hint,
@@ -325,4 +320,142 @@ fn to_js_val<T: Into<JsValue>>(val: Option<T>) -> JsValue {
 #[worker::send]
 pub async fn send_verification_email() -> String {
     "fixed-token-to-mock".to_string()
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct VerifyPasswordRequest {
+    pub master_password_hash: String,
+}
+
+#[worker::send]
+pub async fn export_vault(
+    claims: Claims,
+    State(env): State<Arc<Env>>,
+    Json(payload): Json<VerifyPasswordRequest>,
+) -> Result<Json<Value>, AppError> {
+    let db = db::get_db(&env)?;
+    
+    // 验证密码
+    let user: Value = db
+        .prepare("SELECT * FROM users WHERE id = ?1")
+        .bind(&[claims.sub.clone().into()])?
+        .first(None)
+        .await
+        .map_err(|_| AppError::Database)?
+        .ok_or_else(|| AppError::NotFound("User not found".to_string()))?;
+    let user: User = serde_json::from_value(user).map_err(|_| AppError::Internal)?;
+
+    if !constant_time_eq(
+        user.master_password_hash.as_bytes(),
+        payload.master_password_hash.as_bytes(),
+    ) {
+        return Err(AppError::Unauthorized("Invalid credentials".to_string()));
+    }
+
+    // 获取所有文件夹
+    let folders_raw: Vec<Value> = db
+        .prepare("SELECT * FROM folders WHERE user_id = ?1")
+        .bind(&[claims.sub.clone().into()])?
+        .all()
+        .await?
+        .results()?;
+
+    // 转换文件夹格式（只保留id和name）
+    let folders: Vec<Value> = folders_raw
+        .into_iter()
+        .map(|f| {
+            json!({
+                "id": f.get("id").and_then(|v| v.as_str()).unwrap_or(""),
+                "name": f.get("name").and_then(|v| v.as_str()).unwrap_or("")
+            })
+        })
+        .collect();
+
+    // 获取所有密码项
+    let ciphers_raw: Vec<Value> = db
+        .prepare("SELECT * FROM ciphers WHERE user_id = ?1")
+        .bind(&[claims.sub.clone().into()])?
+        .all()
+        .await?
+        .results()?;
+
+    // 转换密码项格式（展开data字段到顶层）
+    let items: Vec<Value> = ciphers_raw
+        .into_iter()
+        .map(|c| {
+            let mut item = json!({
+                "id": c.get("id").and_then(|v| v.as_str()).unwrap_or(""),
+                "type": c.get("type").and_then(|v| v.as_i64()).unwrap_or(1),
+                "favorite": c.get("favorite").and_then(|v| v.as_i64()).unwrap_or(0) != 0,
+                "folderId": c.get("folder_id"),
+                "organizationId": c.get("organization_id"),
+                "revisionDate": c.get("updated_at").and_then(|v| v.as_str()).unwrap_or(""),
+                "creationDate": c.get("created_at").and_then(|v| v.as_str()).unwrap_or(""),
+                "deletedDate": c.get("deleted_at"),
+                "reprompt": 0,
+                "collectionIds": Value::Null
+            });
+
+            // 解析data字段并合并到item中
+            if let Some(data_str) = c.get("data").and_then(|v| v.as_str()) {
+                if let Ok(data) = serde_json::from_str::<Value>(data_str) {
+                    if let Some(data_obj) = data.as_object() {
+                        // 合并data中的字段
+                        if let Some(item_obj) = item.as_object_mut() {
+                            for (key, value) in data_obj {
+                                item_obj.insert(key.clone(), value.clone());
+                            }
+                        }
+                    }
+                }
+            }
+
+            item
+        })
+        .collect();
+
+    // 返回备份数据（Bitwarden导出格式）
+    Ok(Json(json!({
+        "encrypted": false,
+        "folders": folders,
+        "items": items,
+    })))
+}
+
+#[worker::send]
+pub async fn delete_account(
+    claims: Claims,
+    State(env): State<Arc<Env>>,
+    Json(payload): Json<VerifyPasswordRequest>,
+) -> Result<Json<Value>, AppError> {
+    let db = db::get_db(&env)?;
+    
+    // 验证密码
+    let user: Value = db
+        .prepare("SELECT * FROM users WHERE id = ?1")
+        .bind(&[claims.sub.clone().into()])?
+        .first(None)
+        .await
+        .map_err(|_| AppError::Database)?
+        .ok_or_else(|| AppError::NotFound("User not found".to_string()))?;
+    let user: User = serde_json::from_value(user).map_err(|_| AppError::Internal)?;
+
+    if !constant_time_eq(
+        user.master_password_hash.as_bytes(),
+        payload.master_password_hash.as_bytes(),
+    ) {
+        return Err(AppError::Unauthorized("Invalid credentials".to_string()));
+    }
+
+    // 删除用户数据（由于外键约束，会级联删除相关数据）
+    db.prepare("DELETE FROM users WHERE id = ?1")
+        .bind(&[claims.sub.into()])?
+        .run()
+        .await
+        .map_err(|_| AppError::Database)?;
+
+    Ok(Json(json!({
+        "message": "Account deleted successfully"
+    })))
 }

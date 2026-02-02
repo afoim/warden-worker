@@ -14,7 +14,24 @@ Warden Worker 是一个运行在 Cloudflare Workers 上的轻量级 Bitwarden �
 - 核心能力：注册/登录、同步、密码项（Cipher）增删改、文件夹、TOTP（Authenticator）二步验证
 - 官方安卓兼容：支持 `/api/devices/knowndevice` 与 remember-device（twoFactorProvider=5）流程
 
-## 快速部署（Cloudflare）
+## 自动部署（Github Action）
+
+### 0. 前置条件
+- Cloudflare 账号 + R2数据库
+- Github 账号 + Action构建权
+
+### 1. 部署仓库 
+
+1. 点击[Fork本项目](https://github.com/PIKACHUIM/warden-worker/fork)，克隆到你的Github账号
+![QQ20260127-153440.jpg](images/QQ20260127-153440.jpg)
+
+2.
+2. 
+![QQ20260127-150742.jpg](images/QQ20260127-150742.jpg)
+
+
+
+## 手动部署（Cloudflare）
 
 ### 0. 前置条件
 
@@ -26,7 +43,7 @@ Warden Worker 是一个运行在 Cloudflare Workers 上的轻量级 Bitwarden �
 ### 1. 创建 D1 数据库
 
 ```bash
-wrangler d1 create vault1
+wrangler d1 create cfwarden-db
 ```
 
 把输出的 `database_id` 写入 `wrangler.jsonc` 的 `d1_databases`。
@@ -36,7 +53,7 @@ wrangler d1 create vault1
 注意：`sql/schema_full.sql` 会 `DROP TABLE`，仅用于全新部署（会清空数据）。
 
 ```bash
-wrangler d1 execute vault1 --remote --file=sql/schema_full.sql
+wrangler d1 execute cfwarden-db --remote --file=sql/schema_full.sql
 ```
 
 `sql/schema.sql` 仅保留为历史/兼容用途；推荐新部署直接使用 `sql/schema_full.sql`。
@@ -52,7 +69,7 @@ wrangler secret put TWO_FACTOR_ENC_KEY
 
 - JWT_SECRET：访问令牌签名密钥
 - JWT_REFRESH_SECRET：刷新令牌签名密钥
-- ALLOWED_EMAILS：首个账号注册白名单（仅在“数据库还没有任何用户”时启用），多个邮箱用英文逗号分隔
+- ALLOWED_EMAILS：注册白名单，多个邮箱用英文逗号分隔；可使用 `*` 表示允许所有邮箱注册
 - TWO_FACTOR_ENC_KEY：可选，Base64 的 32 字节密钥；用于加密存储 TOTP 秘钥（不设置则以 `plain:` 形式存储）
 
 ### 4. 部署
@@ -81,7 +98,7 @@ wrangler deploy
 ## 本地开发
 
 ```bash
-wrangler d1 execute vault1 --local --file=sql/schema_full.sql
+wrangler d1 execute cfwarden-db --local --file=sql/schema_full.sql
 wrangler dev
 ```
 

@@ -2,7 +2,7 @@ use axum::{
     extract::FromRequestParts,
     http::{header, request::Parts},
 };
-use jsonwebtoken::{decode, DecodingKey, Validation};
+use jsonwebtoken::{decode, Algorithm, DecodingKey, Validation};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use worker::Env;
@@ -45,7 +45,11 @@ impl FromRequestParts<Arc<Env>> for Claims
 
         // Decode and validate the token
         let decoding_key = DecodingKey::from_secret(secret.to_string().as_ref());
-        let token_data = decode::<Claims>(&token, &decoding_key, &Validation::default())
+        let mut validation = Validation::new(Algorithm::HS256);
+        validation.validate_nbf = true;
+        validation.leeway = 60;
+
+        let token_data = decode::<Claims>(&token, &decoding_key, &validation)
             .map_err(|_| AppError::Unauthorized("Invalid token".to_string()))?;
 
         Ok(token_data.claims)

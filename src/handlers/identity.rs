@@ -1,4 +1,4 @@
-use axum::{extract::State, response::IntoResponse, Form, Json};
+use axum::{extract::State, http::HeaderMap, response::IntoResponse, Form, Json};
 use axum::http::StatusCode;
 use axum::response::Response;
 use chrono::{Duration, Utc};
@@ -171,6 +171,81 @@ async fn ensure_devices_table(db: &worker::D1Database) -> Result<(), AppError> {
     Ok(())
 }
 
+async fn ensure_login_rate_limits_table(db: &worker::D1Database) -> Result<(), AppError> {
+    db.prepare(
+        "CREATE TABLE IF NOT EXISTS login_rate_limits (
+            key TEXT PRIMARY KEY NOT NULL,
+            count INTEGER NOT NULL,
+            reset_at INTEGER NOT NULL
+        )",
+    )
+    .run()
+    .await
+    .map_err(|_| AppError::Database)?;
+    Ok(())
+}
+
+fn client_ip(headers: &HeaderMap) -> String {
+    headers
+        .get("cf-connecting-ip")
+        .and_then(|v| v.to_str().ok())
+        .map(|s| s.to_string())
+        .or_else(|| {
+            headers
+                .get("x-forwarded-for")
+                .and_then(|v| v.to_str().ok())
+                .and_then(|s| s.split(',').next())
+                .map(|s| s.trim().to_string())
+        })
+        .unwrap_or_else(|| "unknown".to_string())
+}
+
+async fn enforce_login_rate_limit(db: &worker::D1Database, key: &str) -> Result<(), AppError> {
+    ensure_login_rate_limits_table(db).await?;
+    let now = Utc::now().timestamp_millis();
+    let window_ms: i64 = 5 * 60 * 1000;
+    let max_attempts: i64 = 30;
+
+    let row: Option<serde_json::Value> = db
+        .prepare("SELECT count, reset_at FROM login_rate_limits WHERE key = ?1")
+        .bind(&[key.into()])?
+        .first(None)
+        .await
+        .map_err(|_| AppError::Database)?;
+
+    let (mut count, mut reset_at) = if let Some(row) = row {
+        let count = row.get("count").and_then(|v| v.as_f64()).map(|v| v as i64).unwrap_or(0);
+        let reset_at = row.get("reset_at").and_then(|v| v.as_f64()).map(|v| v as i64).unwrap_or(0);
+        (count, reset_at)
+    } else {
+        (0, 0)
+    };
+
+    if now >= reset_at {
+        count = 0;
+        reset_at = now + window_ms;
+    }
+
+    count += 1;
+
+    db.prepare(
+        "INSERT INTO login_rate_limits (key, count, reset_at) VALUES (?1, ?2, ?3)
+         ON CONFLICT(key) DO UPDATE SET count = excluded.count, reset_at = excluded.reset_at",
+    )
+    .bind(&[key.into(), (count as f64).into(), (reset_at as f64).into()])?
+    .run()
+    .await
+    .map_err(|_| AppError::Database)?;
+
+    if count > max_attempts {
+        return Err(AppError::TooManyRequests(
+            "Too many login attempts. Please try again later.".to_string(),
+        ));
+    }
+
+    Ok(())
+}
+
 fn sha256_hex(input: &str) -> String {
     let mut hasher = Sha256::new();
     hasher.update(input.as_bytes());
@@ -214,11 +289,16 @@ fn invalid_two_factor_response() -> Response {
 #[worker::send]
 pub async fn token(
     State(env): State<Arc<Env>>,
+    headers: HeaderMap,
     Form(payload): Form<TokenRequest>,
 ) -> Result<Response, AppError> {
     let db = db::get_db(&env)?;
     match payload.grant_type.as_str() {
         "password" => {
+            let ip = client_ip(&headers);
+            let rate_key = format!("login:{}", ip);
+            enforce_login_rate_limit(&db, &rate_key).await?;
+
             let username = payload
                 .username
                 .ok_or_else(|| AppError::BadRequest("Missing username".to_string()))?;

@@ -1,0 +1,115 @@
+name: Deploy to Cloudflare
+
+on:
+  push:
+    branches: [main, uat, release*]
+  workflow_dispatch:
+
+env:
+  DATABASE_NAME: cfwarden-data
+
+jobs:
+  deploy:
+    name: Deploy Cloudflare Worker
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '20'
+
+    - name: Install Wrangler CLI
+      run: npm install -g wrangler
+
+    - name: Setup Rust toolchain
+      run: |
+        rustup toolchain install stable --profile minimal
+        rustup target add wasm32-unknown-unknown
+
+    - name: Install system dependencies
+      run: sudo apt install -y lld clang gcc llvm
+
+    - name: Install worker-build
+      run: cargo install worker-build
+
+    - name: Authenticate with Cloudflare
+      run: echo "Authenticated with Cloudflare"
+      env:
+        CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+
+    - name: Create D1 database
+      id: create_db
+      run: |
+        # Create D1 database and capture output
+        DB_OUTPUT=$(wrangler d1 create $DATABASE_NAME)
+        echo "$DB_OUTPUT"
+        
+        # Extract database_id from output
+        DATABASE_ID=$(echo "$DB_OUTPUT" | grep -oP 'database_id: \"\\K[^\"]+' || echo "")
+        
+        if [ -n "$DATABASE_ID" ]; then
+          echo "DATABASE_ID=$DATABASE_ID" >> $GITHUB_OUTPUT
+          echo "Database created with ID: $DATABASE_ID"
+        else
+          echo "Warning: Could not extract database_id from output"
+          echo "DATABASE_ID=${{ secrets.D1_DATABASE_ID }}" >> $GITHUB_OUTPUT
+        fi
+      env:
+        CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+
+    - name: Update wrangler.jsonc
+      run: |
+        cat <<EOF > wrangler.jsonc
+        {
+          "name": "cfwarden-work",
+          "main": "build/index.js",
+          "compatibility_date": "2025-09-19",
+          "account_id": "${{ secrets.CLOUDFLARE_ACCOUNT_ID }}",
+          "d1_databases": [
+            {
+              "binding": "cfwarden_data",
+              "database_name": "cfwarden-data",
+              "database_id": "${{ steps.create_db.outputs.DATABASE_ID }}",
+              "remote": true
+            }
+          ],
+          "vars": {
+            "JWT_SECRET": "${{ secrets.JWT_SECRET }}",
+            "JWT_REFRESH_SECRET": "${{ secrets.JWT_REFRESH_SECRET }}",
+            "ALLOWED_EMAILS": "${{ secrets.ALLOWED_EMAILS }}",
+            "TWO_FACTOR_ENC_KEY": "${{ secrets.TWO_FACTOR_ENC_KEY }}"
+          },
+          "observability": {
+            "logs": {
+              "enabled": true,
+              "head_sampling_rate": 1,
+              "invocation_logs": true,
+              "persist": true
+            }
+          },
+          "build": {
+            "command": "worker-build --release"
+          }
+        }
+        EOF
+
+    - name: Initialize database schema
+      run: wrangler d1 execute $DATABASE_NAME --remote --file=sql/schema_full.sql
+      env:
+        CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+
+    - name: Build worker
+      run: worker-build --release
+
+    - name: Deploy to Cloudflare
+      run: wrangler deploy
+      env:
+        CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}

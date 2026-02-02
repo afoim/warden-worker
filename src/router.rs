@@ -27,6 +27,8 @@ pub fn api_router(env: Env) -> Router {
         )
         .route("/api/accounts/profile", get(accounts::profile))
         .route("/api/accounts/revision-date", get(accounts::revision_date))
+        .route("/api/accounts/export", post(accounts::export_vault))
+        .route("/api/accounts", delete(accounts::delete_account))
         .route("/api/devices/knowndevice", get(devices::knowndevice))
         .route("/api/accounts/password", put(accounts::change_master_password))
         .route("/api/accounts/email", put(accounts::change_email))
