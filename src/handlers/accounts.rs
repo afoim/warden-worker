@@ -354,26 +354,72 @@ pub async fn export_vault(
     }
 
     // 获取所有文件夹
-    let folders: Vec<Value> = db
+    let folders_raw: Vec<Value> = db
         .prepare("SELECT * FROM folders WHERE user_id = ?1")
         .bind(&[claims.sub.clone().into()])?
         .all()
         .await?
         .results()?;
 
+    // 转换文件夹格式（只保留id和name）
+    let folders: Vec<Value> = folders_raw
+        .into_iter()
+        .map(|f| {
+            json!({
+                "id": f.get("id").and_then(|v| v.as_str()).unwrap_or(""),
+                "name": f.get("name").and_then(|v| v.as_str()).unwrap_or("")
+            })
+        })
+        .collect();
+
     // 获取所有密码项
-    let ciphers: Vec<Value> = db
+    let ciphers_raw: Vec<Value> = db
         .prepare("SELECT * FROM ciphers WHERE user_id = ?1")
         .bind(&[claims.sub.clone().into()])?
         .all()
         .await?
         .results()?;
 
-    // 返回备份数据
+    // 转换密码项格式（展开data字段到顶层）
+    let items: Vec<Value> = ciphers_raw
+        .into_iter()
+        .map(|c| {
+            let mut item = json!({
+                "id": c.get("id").and_then(|v| v.as_str()).unwrap_or(""),
+                "type": c.get("type").and_then(|v| v.as_i64()).unwrap_or(1),
+                "favorite": c.get("favorite").and_then(|v| v.as_i64()).unwrap_or(0) != 0,
+                "folderId": c.get("folder_id"),
+                "organizationId": c.get("organization_id"),
+                "revisionDate": c.get("updated_at").and_then(|v| v.as_str()).unwrap_or(""),
+                "creationDate": c.get("created_at").and_then(|v| v.as_str()).unwrap_or(""),
+                "deletedDate": c.get("deleted_at"),
+                "reprompt": 0,
+                "collectionIds": Value::Null
+            });
+
+            // 解析data字段并合并到item中
+            if let Some(data_str) = c.get("data").and_then(|v| v.as_str()) {
+                if let Ok(data) = serde_json::from_str::<Value>(data_str) {
+                    if let Some(data_obj) = data.as_object() {
+                        // 合并data中的字段
+                        if let Some(item_obj) = item.as_object_mut() {
+                            for (key, value) in data_obj {
+                                item_obj.insert(key.clone(), value.clone());
+                            }
+                        }
+                    }
+                }
+            }
+
+            item
+        })
+        .collect();
+
+    // 返回备份数据（Bitwarden导出格式）
     Ok(Json(json!({
-        "encrypted": true,
+        "encrypted": false,
         "folders": folders,
-        "items": ciphers,
+        "items": items,
     })))
 }
 

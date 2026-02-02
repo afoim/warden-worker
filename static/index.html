@@ -104,6 +104,10 @@
             color: #155724;
         }
 
+        [data-theme="light"] .danger-box {
+            color: #721c24;
+        }
+
         /* 白天模式下的表单元素优化 */
         [data-theme="light"] .form-input:focus,
         [data-theme="light"] .form-textarea:focus {
@@ -176,7 +180,6 @@
         }
 
         .section {
-            background: var(--bg-section);
             padding: 2rem;
             border-radius: 16px;
             margin-top: 1.5rem;
@@ -227,6 +230,7 @@
             font-size: 0.95rem;
             color: var(--text-secondary);
             line-height: 1.7;
+            text-align: center;
         }
 
         .warning-box {
@@ -238,6 +242,7 @@
             font-size: 0.95rem;
             color: var(--text-secondary);
             line-height: 1.7;
+            text-align: center;
         }
 
         .success-box {
@@ -249,6 +254,19 @@
             font-size: 0.95rem;
             color: var(--text-secondary);
             line-height: 1.7;
+            text-align: center;
+        }
+
+        .danger-box {
+            background: var(--error-bg);
+            border-left: 3px solid var(--error-border);
+            padding: 1.25rem;
+            border-radius: 12px;
+            margin-bottom: 1.25rem;
+            font-size: 0.95rem;
+            color: var(--text-secondary);
+            line-height: 1.7;
+            text-align: center;
         }
 
         .form-group {
@@ -631,7 +649,9 @@
     <h1>🔐 Warden Worker</h1>
     <div class="subtitle">
         运行在 Cloudflare Workers 上的 Bitwarden 兼容服务器<br>
-        开源、安全、快速、易用的密码管理解决方案
+        开源、安全、快速、易用的密码管理解决方案<br>
+        服务器地址：<span id="serverUrl"></span>
+        <button id="copyServerUrl" class="copy-btn" title="复制服务器地址">📋</button>
     </div>
 
     <!-- TAB 导航 -->
@@ -674,7 +694,6 @@
             <div id="registerResult" class="result"></div>
         </div>
         <div class="success-box" style="margin-top: 1.5rem;">
-            <strong>ℹ️ 重要提醒</strong><br>
             所有密码操作均在浏览器本地完成，服务器仅接收加密后的数据<br/>
             在进行重要操作前，请先导出备份，避免数据丢失
         </div>
@@ -712,7 +731,6 @@
         </div>
 
         <div class="success-box" style="margin-top: 1.5rem;">
-            <strong>ℹ️ 重要提醒</strong><br>
             所有密码操作均在浏览器本地完成，服务器仅接收加密后的数据<br/>
             在进行重要操作前，请先导出备份，避免数据丢失
         </div>
@@ -731,13 +749,17 @@
                 <input id="emailNew" type="email" class="form-input" placeholder="next@email.com">
             </div>
             <div class="form-group">
+                <label class="form-label">确认新邮箱</label>
+                <input id="emailNewConfirm" type="email" class="form-input" placeholder="再次输入新邮箱">
+            </div>
+            <div class="form-group">
                 <label class="form-label">主密码</label>
                 <input id="emailPassword" type="password" class="form-input" placeholder="输入密码验证身份">
             </div>
-            <br/><br/>
-            <div class="info-box">
-                💡 <strong>温馨提示：</strong>主密码是解密所有数据的唯一密钥，请务必牢记。<br/>
-                💡 <strong>隐私声明：</strong>服务器不存储明文密码，忘记密码后将无法找回。
+            <br/>
+            <div class="info-box" style="margin-top: 1.5rem;">
+                💡 <strong>温馨提示：</strong>修改邮箱后，主密钥会使用新邮箱重新派生。<br/>
+                请使用新邮箱登录 Bitwarden 客户端。
             </div>
             <div class="btn-group">
                 <a class="btn" href="#" id="submitEmail">确认修改</a>
@@ -745,9 +767,9 @@
             <div id="resultEmail" class="result"></div>
         </div>
 
-        <div class="info-box" style="margin-top: 1.5rem;">
-            💡 <strong>提示：</strong>修改邮箱后，主密钥会使用新邮箱重新派生。<br/>
-            请使用新邮箱登录 Bitwarden 客户端。
+        <div class="success-box" style="margin-top: 1.5rem;">
+            所有密码操作均在浏览器本地完成，服务器仅接收加密后的数据<br/>
+            在进行重要操作前，请先导出备份，避免数据丢失
         </div>
     </div>
 
@@ -763,7 +785,7 @@
             </div>
             <div class="form-group">
                 <label class="form-label">主密码</label>
-                <input id="totpPassword" type="password" class="form-input" placeholder="输入主密码">
+                <input id="totpPassword" type="password" class="form-input" placeholder="输入密码验证身份">
             </div>
 
             <div class="btn-group">
@@ -803,8 +825,8 @@
         </div>
 
         <div class="info-box" style="margin-top: 1.5rem;">
-            💡 <strong>提示：</strong>启用二次验证后，每次登录都需要输入动态验证码。<br/>
-            请妥善保管认证器 App 中的密钥。
+            💡 <strong>温馨提示：</strong>启用二次验证后，每次登录都需要输入动态验证码。<br/>
+            💡 <strong>温馨提示：</strong>请妥善保管认证器中的密钥，避免丢失平台访权限。
         </div>
     </div>
 
@@ -852,7 +874,7 @@
                 </div>
                 <div class="form-group">
                     <label class="form-label">主密码</label>
-                    <input id="importPassword" type="password" class="form-input" placeholder="输入主密码验证身份">
+                    <input id="importPassword" type="password" class="form-input" placeholder="输入密码验证身份">
                 </div>
                 <div class="form-group">
                     <label class="form-label">选择备份文件</label>
@@ -865,6 +887,10 @@
             </div>
 
             <div id="resultBackup" class="result"></div>
+            <div class="warning-box" style="margin-top: 1.5rem;">
+                💡 导出的备份文件包含加密数据，请您妥善保管<br/>
+                💡 导入时，将覆盖您当前的密码库数据全部内容
+            </div>
         </div>
 
         <div class="section" style="margin-top: 2rem;">
@@ -877,7 +903,7 @@
             </div>
             <div class="form-group">
                 <label class="form-label">主密码</label>
-                <input id="deletePassword" type="password" class="form-input" placeholder="输入主密码验证身份">
+                <input id="deletePassword" type="password" class="form-input" placeholder="输入密码验证身份">
             </div>
             <div class="btn-group">
                 <a class="btn" href="#" id="deleteAccount" style="background: var(--danger-color);">🗑️ 删除账号</a>
@@ -885,10 +911,8 @@
             <div id="resultDelete" class="result"></div>
         </div>
 
-        <div class="warning-box" style="margin-top: 1.5rem;">
-            ⚠️ <strong>重要提醒：</strong><br/>
-            • 导出的备份文件包含加密数据，请您妥善保管<br/>
-            • 删除账号后，所有数据将永久丢失，无法恢复<br/>
+        <div class="danger-box" style="margin-top: 1.5rem;">
+            ⚠️ <strong>重要提醒</strong><br/>删除账号后，所有数据将永久丢失，无法恢复<br/>
         </div>
     </div>
 
@@ -898,13 +922,60 @@
 </div>
 
 <script>
+    // ========== 服务器地址显示和复制功能 ==========
+    // 从 URL 获取并显示服务器地址
+    const serverUrlElement = document.getElementById('serverUrl');
+    const copyServerUrlBtn = document.getElementById('copyServerUrl');
+    const serverUrl = window.location.origin;
+    
+    // 显示服务器地址
+    serverUrlElement.textContent = serverUrl;
+    
+    // 复制服务器地址功能
+    copyServerUrlBtn.addEventListener('click', async () => {
+        try {
+            await navigator.clipboard.writeText(serverUrl);
+            // 临时改变按钮文本提示复制成功
+            const originalText = copyServerUrlBtn.textContent;
+            copyServerUrlBtn.textContent = '✅';
+            setTimeout(() => {
+                copyServerUrlBtn.textContent = originalText;
+            }, 2000);
+        } catch (err) {
+            console.error('复制失败:', err);
+            // 降级方案：使用传统方法复制
+            const textArea = document.createElement('textarea');
+            textArea.value = serverUrl;
+            textArea.style.position = 'fixed';
+            textArea.style.left = '-999999px';
+            document.body.appendChild(textArea);
+            textArea.select();
+            try {
+                document.execCommand('copy');
+                const originalText = copyServerUrlBtn.textContent;
+                copyServerUrlBtn.textContent = '✅';
+                setTimeout(() => {
+                    copyServerUrlBtn.textContent = originalText;
+                }, 2000);
+            } catch (err2) {
+                console.error('降级复制也失败:', err2);
+                alert('复制失败，请手动复制');
+            }
+            document.body.removeChild(textArea);
+        }
+    });
+
+    // ========== 主题切换功能 ==========
     // 主题切换功能
     const themeToggle = document.getElementById('themeToggle');
     const themeIcon = document.getElementById('themeIcon');
     const htmlElement = document.documentElement;
 
     // 从 localStorage 读取主题偏好，默认为暗黑模式
-    const savedTheme = localStorage.getItem('theme') || 'dark';
+    // 获取系统主题偏好
+    const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+    const systemTheme = prefersDark ? 'dark' : 'light';
+    const savedTheme = localStorage.getItem('theme') || systemTheme;
     
     // 应用主题
     function applyTheme(theme) {
@@ -976,6 +1047,7 @@
     const resultEl = document.getElementById('result');
     const emailCurrentInput = document.getElementById('emailCurrent');
     const emailNewInput = document.getElementById('emailNew');
+    const emailNewConfirmInput = document.getElementById('emailNewConfirm');
     const emailPasswordInput = document.getElementById('emailPassword');
     const resultEmailEl = document.getElementById('resultEmail');
     const totpEmailInput = document.getElementById('totpEmail');
@@ -1231,7 +1303,7 @@
             throw new Error(`prelogin 失败 HTTP ${preloginResp.status}\n${preloginText}`);
         }
         const preloginJson = JSON.parse(preloginText);
-        return preloginJson.kdfIterations;
+        return Number(preloginJson.kdfIterations);
     }
 
     async function login(email, masterPasswordHash) {
@@ -1432,10 +1504,15 @@
         try {
             const emailCurrent = emailCurrentInput.value.trim();
             const emailNew = emailNewInput.value.trim();
+            const emailNewConfirm = emailNewConfirmInput.value.trim();
             const password = emailPasswordInput.value;
 
-            if (!emailCurrent || !emailNew || !password) {
+            if (!emailCurrent || !emailNew || !emailNewConfirm || !password) {
                 showResult(resultEmailEl, '❌ 请填写所有必填项', 'error');
+                return;
+            }
+            if (emailNew.toLowerCase() !== emailNewConfirm.toLowerCase()) {
+                showResult(resultEmailEl, '❌ 两次输入的新邮箱不一致', 'error');
                 return;
             }
             if (emailCurrent.toLowerCase() === emailNew.toLowerCase()) {
@@ -1495,6 +1572,7 @@
             // 清空表单
             emailCurrentInput.value = '';
             emailNewInput.value = '';
+            emailNewConfirmInput.value = '';
             emailPasswordInput.value = '';
         } catch (err) {
             showResult(resultEmailEl, '❌ ' + String(err), 'error');
@@ -1654,11 +1732,11 @@
                 showResult(resultBackupEl, '❌ 获取 KDF 参数失败', 'error');
                 return;
             }
-            const {kdf_iterations} = await preloginResp.json();
+            const {kdfIterations} = await preloginResp.json();
 
             // 生成主密钥和密码哈希
-            const masterKey = await deriveMasterKey(email, password, kdf_iterations);
-            const masterPasswordHash = await hashMasterPassword(masterKey, password);
+            const masterKey = await deriveMasterKey(email, password, kdfIterations);
+const masterPasswordHash = await deriveMasterPasswordHash(masterKey, password);
 
             // 登录获取 token
             const tokenResp = await fetch('/identity/connect/token', {
@@ -1753,11 +1831,11 @@
                 showResult(resultBackupEl, '❌ 获取 KDF 参数失败', 'error');
                 return;
             }
-            const {kdf_iterations} = await preloginResp.json();
+            const {kdfIterations} = await preloginResp.json();
 
             // 生成主密钥和密码哈希
-            const masterKey = await deriveMasterKey(email, password, kdf_iterations);
-            const masterPasswordHash = await hashMasterPassword(masterKey, password);
+            const masterKey = await deriveMasterKey(email, password, kdfIterations);
+const masterPasswordHash = await deriveMasterPasswordHash(masterKey, password);
 
             // 登录获取 token
             const tokenResp = await fetch('/identity/connect/token', {
@@ -1789,11 +1867,63 @@
                 try {
                     const backupData = JSON.parse(event.target.result);
                     
-                    // 这里需要用户登录后才能导入
-                    // 实际上应该调用 /api/ciphers/import 接口
-                    showResult(resultBackupEl, '⚠️ 导入功能需要在 Bitwarden 客户端中使用，请在客户端选择"导入数据"功能', 'info');
+                    // 验证备份文件格式
+                    if (!backupData.folders || !backupData.items) {
+                        showResult(resultBackupEl, '❌ 备份文件格式错误：缺少必要字段', 'error');
+                        return;
+                    }
+
+                    showResult(resultBackupEl, '⏳ 正在导入数据...', 'info');
+
+                    // 转换为后端期望的格式
+                    const importData = {
+                        folders: backupData.folders.map(f => ({
+                            id: f.id,
+                            name: f.name
+                        })),
+                        ciphers: backupData.items.map(item => ({
+                            type: item.type || 1,
+                            folderId: item.folderId || null,
+                            organizationId: item.organizationId || null,
+                            name: item.name || '',
+                            notes: item.notes || null,
+                            favorite: item.favorite || false,
+                            login: item.login || null,
+                            card: item.card || null,
+                            identity: item.identity || null,
+                            secureNote: item.secureNote || null,
+                            fields: item.fields || null,
+                            passwordHistory: item.passwordHistory || null,
+                            reprompt: item.reprompt || 0,
+                            encryptedFor: email  // 标记为当前用户加密
+                        })),
+                        folderRelationships: []
+                    };
+
+                    // 调用导入接口
+                    const importResp = await fetch('/api/ciphers/import', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'Authorization': `Bearer ${access_token}`
+                        },
+                        body: JSON.stringify(importData)
+                    });
+
+                    if (!importResp.ok) {
+                        const errorText = await importResp.text();
+                        showResult(resultBackupEl, `❌ 导入失败：${errorText}`, 'error');
+                        return;
+                    }
+
+                    showResult(resultBackupEl, `✅ 导入成功！已导入 ${importData.folders.length} 个文件夹和 ${importData.ciphers.length} 个密码项`, 'success');
+                    
+                    // 清空表单
+                    importEmailInput.value = '';
+                    importPasswordInput.value = '';
+                    importFileInput.value = '';
                 } catch (err) {
-                    showResult(resultBackupEl, '❌ 备份文件格式错误', 'error');
+                    showResult(resultBackupEl, '❌ 备份文件格式错误：' + String(err), 'error');
                 }
             };
             reader.readAsText(file);
@@ -1909,11 +2039,11 @@
                     showResult(resultDeleteEl, '❌ 获取 KDF 参数失败', 'error');
                     return;
                 }
-                const {kdf_iterations} = await preloginResp.json();
+                const {kdfIterations} = await preloginResp.json();
 
                 // 生成主密钥和密码哈希
-                const masterKey = await deriveMasterKey(email, password, kdf_iterations);
-                const masterPasswordHash = await hashMasterPassword(masterKey, password);
+                const masterKey = await deriveMasterKey(email, password, kdfIterations);
+const masterPasswordHash = await deriveMasterPasswordHash(masterKey, password);
 
                 // 登录获取 token
                 const tokenResp = await fetch('/identity/connect/token', {
