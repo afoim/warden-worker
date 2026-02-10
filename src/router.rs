@@ -28,6 +28,10 @@ pub fn api_router(env: Env) -> Router {
         .route("/api/accounts/profile", get(accounts::profile))
         .route("/api/accounts/revision-date", get(accounts::revision_date))
         .route("/api/devices/knowndevice", get(devices::knowndevice))
+        .route(
+            "/api/devices/identifier/{id}/token",
+            put(devices::device_token).post(devices::device_token),
+        )
         .route("/api/accounts/password", put(accounts::change_master_password))
         .route("/api/accounts/email", put(accounts::change_email))
         .route("/api/two-factor", get(two_factor::two_factor_status))

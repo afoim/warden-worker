@@ -1,5 +1,7 @@
 use axum::{extract::State, http::HeaderMap, Json};
+use axum::extract::Path;
 use base64::{engine::general_purpose, Engine as _};
+use serde::Deserialize;
 use serde_json::json;
 use std::sync::Arc;
 use worker::Env;
@@ -77,4 +79,19 @@ pub async fn knowndevice(
         .map_err(|_| AppError::Database)?;
 
     Ok(Json(json!(exists.is_some())))
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PushTokenRequest {
+    push_token: String,
+}
+
+#[worker::send]
+pub async fn device_token(
+    State(_env): State<Arc<Env>>,
+    Path(_device_id): Path<String>,
+    Json(_payload): Json<PushTokenRequest>,
+) -> Result<Json<()>, AppError> {
+    Ok(Json(()))
 }

@@ -1,0 +1,123 @@
+Bitwarden Android - Password Manager
+Log Start Time: 2026-02-10 12:51:05:678
+Log Duration: 1d
+App Version: 2026.1.0 (21141)
+Build: release/standard
+Operating System: 15 (35)
+Device: Redmi 22081212C
+Fingerprint: Redmi/diting/diting:15/AQ3A.250226.002/OS3.0.1.0.VLFCNXM:user/release-keys
+2026-02-10 12:51:05:685 – DEBUG – a – RootNavScreen destination changed: com.x8bit.bitwarden.ui.platform.feature.vaultunlockednavbar.VaultUnlockedNavbarRoute in com.x8bit.bitwarden.ui.platform.feature.vaultunlocked.VaultUnlockedGraphRoute
+2026-02-10 12:51:05:709 – DEBUG – a – VaultUnlockedNavBarScreen destination changed: com.x8bit.bitwarden.ui.platform.feature.settings.about.SettingsAboutRoute.Standard in com.x8bit.bitwarden.ui.platform.feature.settings.SettingsGraphRoute
+2026-02-10 12:51:08:707 – DEBUG – f – Network status change: Cellular
+2026-02-10 12:51:08:711 – DEBUG – BitwardenNetworkClient – --> PUT https://key.snakexgc.com/api/devices/identifier/ab8c9f40-cb30-41ad-b2de-94b4bfafe5af/token (158-byte body)
+2026-02-10 12:51:08:727 – DEBUG – h – Current environment: SELF_HOSTED
+2026-02-10 12:51:08:734 – DEBUG – h – Current environment: SELF_HOSTED
+2026-02-10 12:51:08:734 – DEBUG – h – Current environment: SELF_HOSTED
+2026-02-10 12:51:08:788 – DEBUG – c – App is foregrounded
+2026-02-10 12:51:08:858 – DEBUG – a – MainActivity destination changed: com.x8bit.bitwarden.ui.platform.feature.rootnav.RootNavigationRoute
+2026-02-10 12:51:08:917 – DEBUG – a – RootNavScreen destination changed: com.x8bit.bitwarden.ui.platform.feature.splash.SplashRoute
+2026-02-10 12:51:08:953 – DEBUG – a – RootNavScreen destination changed: com.x8bit.bitwarden.ui.auth.feature.vaultunlock.VaultUnlockRoute$Standard/{encodedData}
+2026-02-10 12:51:09:231 – DEBUG – BitwardenNetworkClient – --> GET https://key.snakexgc.com/api/config
+2026-02-10 12:51:09:739 – DEBUG – BitwardenNetworkClient – <-- 404 https://key.snakexgc.com/api/devices/identifier/ab8c9f40-cb30-41ad-b2de-94b4bfafe5af/token (1027ms, 0-byte body)
+2026-02-10 12:51:09:739 – WARNING – NetworkResultCall – Network Error: https://api.bitwarden.com/devices/identifier/ab8c9f40-cb30-41ad-b2de-94b4bfafe5af/token
+retrofit2.HttpException: HTTP 404 
+	at com.bitwarden.network.core.NetworkResultCall.toNetworkResult(r8-map-id-02fdf5f89272614ec878de7adda5f42926f9802f10b5d99996c77817a23b127e:9)
+	at com.bitwarden.network.core.NetworkResultCall.access$toNetworkResult(r8-map-id-02fdf5f89272614ec878de7adda5f42926f9802f10b5d99996c77817a23b127e:1)
+	at com.bitwarden.network.core.NetworkResultCall$enqueue$1.onResponse(r8-map-id-02fdf5f89272614ec878de7adda5f42926f9802f10b5d99996c77817a23b127e:15)
+	at tw.v.K0(r8-map-id-02fdf5f89272614ec878de7adda5f42926f9802f10b5d99996c77817a23b127e:13)
+	at ew.l.run(r8-map-id-02fdf5f89272614ec878de7adda5f42926f9802f10b5d99996c77817a23b127e:57)
+	at java.util.concurrent.ThreadPoolExecutor.runWorker(ThreadPoolExecutor.java:1291)
+	at java.util.concurrent.ThreadPoolExecutor$Worker.run(ThreadPoolExecutor.java:670)
+	at java.lang.Thread.run(Thread.java:1012)
+ – retrofit2.HttpException: HTTP 404 
+	at com.bitwarden.network.core.NetworkResultCall.toNetworkResult(r8-map-id-02fdf5f89272614ec878de7adda5f42926f9802f10b5d99996c77817a23b127e:9)
+	at com.bitwarden.network.core.NetworkResultCall.access$toNetworkResult(r8-map-id-02fdf5f89272614ec878de7adda5f42926f9802f10b5d99996c77817a23b127e:1)
+	at com.bitwarden.network.core.NetworkResultCall$enqueue$1.onResponse(r8-map-id-02fdf5f89272614ec878de7adda5f42926f9802f10b5d99996c77817a23b127e:15)
+	at tw.v.K0(r8-map-id-02fdf5f89272614ec878de7adda5f42926f9802f10b5d99996c77817a23b127e:13)
+	at ew.l.run(r8-map-id-02fdf5f89272614ec878de7adda5f42926f9802f10b5d99996c77817a23b127e:57)
+	at java.util.concurrent.ThreadPoolExecutor.runWorker(ThreadPoolExecutor.java:1291)
+	at java.util.concurrent.ThreadPoolExecutor$Worker.run(ThreadPoolExecutor.java:670)
+	at java.lang.Thread.run(Thread.java:1012)
+
+2026-02-10 12:51:09:951 – DEBUG – BitwardenNetworkClient – <-- 200 https://key.snakexgc.com/api/config (720ms, unknown-length body)
+2026-02-10 12:51:18:749 – DEBUG – m1 – [Auth] Vault unlocked, method:  Master Password Unlock
+2026-02-10 12:51:18:761 – DEBUG – a – RootNavScreen destination changed: com.x8bit.bitwarden.ui.auth.feature.vaultunlock.VaultUnlockRoute$Standard/{encodedData}
+2026-02-10 12:51:18:768 – DEBUG – a – RootNavScreen destination changed: com.x8bit.bitwarden.ui.platform.feature.vaultunlockednavbar.VaultUnlockedNavbarRoute in com.x8bit.bitwarden.ui.platform.feature.vaultunlocked.VaultUnlockedGraphRoute
+2026-02-10 12:51:18:768 – DEBUG – a – RootNavScreen destination changed: com.x8bit.bitwarden.ui.platform.feature.vaultunlockednavbar.VaultUnlockedNavbarRoute in com.x8bit.bitwarden.ui.platform.feature.vaultunlocked.VaultUnlockedGraphRoute
+2026-02-10 12:51:18:770 – DEBUG – a – RootNavScreen destination changed: com.x8bit.bitwarden.ui.platform.feature.vaultunlockednavbar.VaultUnlockedNavbarRoute in com.x8bit.bitwarden.ui.platform.feature.vaultunlocked.VaultUnlockedGraphRoute
+2026-02-10 12:51:18:809 – DEBUG – a – VaultUnlockedNavBarScreen destination changed: com.x8bit.bitwarden.ui.vault.feature.vault.VaultRoute in com.x8bit.bitwarden.ui.vault.feature.vault.VaultGraphRoute
+2026-02-10 12:51:18:816 – DEBUG – BitwardenNetworkClient – --> GET https://key.snakexgc.com/api/sync
+2026-02-10 12:51:18:894 – DEBUG – o – Successfully unregistered for CXP export
+2026-02-10 12:51:19:286 – DEBUG – a – MainActivity destination changed: com.x8bit.bitwarden.ui.platform.feature.rootnav.RootNavigationRoute
+2026-02-10 12:51:19:308 – DEBUG – a – RootNavScreen destination changed: com.x8bit.bitwarden.ui.platform.feature.vaultunlockednavbar.VaultUnlockedNavbarRoute in com.x8bit.bitwarden.ui.platform.feature.vaultunlocked.VaultUnlockedGraphRoute
+2026-02-10 12:51:19:338 – DEBUG – a – VaultUnlockedNavBarScreen destination changed: com.x8bit.bitwarden.ui.vault.feature.vault.VaultRoute in com.x8bit.bitwarden.ui.vault.feature.vault.VaultGraphRoute
+2026-02-10 12:51:20:709 – DEBUG – BitwardenNetworkClient – <-- 200 https://key.snakexgc.com/api/sync (1891ms, unknown-length body)
+2026-02-10 12:51:21:464 – WARNING – NetworkResultCall – Network Error: https://api.bitwarden.com/sync
+kotlinx.serialization.MissingFieldException: Field 'restore' is required for type with serial name 'com.bitwarden.network.model.SyncResponseJson.Cipher.CipherPermissions', but it was missing at path: $.ciphers[0].permissions
+	at yv.s.v(r8-map-id-02fdf5f89272614ec878de7adda5f42926f9802f10b5d99996c77817a23b127e:318)
+	at ee.b.w(r8-map-id-02fdf5f89272614ec878de7adda5f42926f9802f10b5d99996c77817a23b127e:30)
+	at com.bitwarden.network.model.SyncResponseJson$Cipher$$serializer.deserialize(r8-map-id-02fdf5f89272614ec878de7adda5f42926f9802f10b5d99996c77817a23b127e:1)
+	at com.bitwarden.network.model.SyncResponseJson$Cipher$$serializer.deserialize(r8-map-id-02fdf5f89272614ec878de7adda5f42926f9802f10b5d99996c77817a23b127e:2)
+	at yv.s.v(r8-map-id-02fdf5f89272614ec878de7adda5f42926f9802f10b5d99996c77817a23b127e:265)
+	at ee.b.z(r8-map-id-02fdf5f89272614ec878de7adda5f42926f9802f10b5d99996c77817a23b127e:11)
+	at yv.s.z(r8-map-id-02fdf5f89272614ec878de7adda5f42926f9802f10b5d99996c77817a23b127e:52)
+	at wv.r.f(r8-map-id-02fdf5f89272614ec878de7adda5f42926f9802f10b5d99996c77817a23b127e:10)
+	at wv.a.e(r8-map-id-02fdf5f89272614ec878de7adda5f42926f9802f10b5d99996c77817a23b127e:29)
+	at wv.a.deserialize(r8-map-id-02fdf5f89272614ec878de7adda5f42926f9802f10b5d99996c77817a23b127e:1)
+	at yv.s.v(r8-map-id-02fdf5f89272614ec878de7adda5f42926f9802f10b5d99996c77817a23b127e:265)
+	at ee.b.w(r8-map-id-02fdf5f89272614ec878de7adda5f42926f9802f10b5d99996c77817a23b127e:30)
+	at com.bitwarden.network.model.SyncResponseJson$$serializer.deserialize(r8-map-id-02fdf5f89272614ec878de7adda5f42926f9802f10b5d99996c77817a23b127e:1)
+	at com.bitwarden.network.model.SyncResponseJson$$serializer.deserialize(r8-map-id-02fdf5f89272614ec878de7adda5f42926f9802f10b5d99996c77817a23b127e:2)
+	at yv.s.v(r8-map-id-02fdf5f89272614ec878de7adda5f42926f9802f10b5d99996c77817a23b127e:265)
+	at xv.c.a(r8-map-id-02fdf5f89272614ec878de7adda5f42926f9802f10b5d99996c77817a23b127e:29)
+	at tw.v.r(r8-map-id-02fdf5f89272614ec878de7adda5f42926f9802f10b5d99996c77817a23b127e:34)
+	at tw.z.c(r8-map-id-02fdf5f89272614ec878de7adda5f42926f9802f10b5d99996c77817a23b127e:54)
+	at tw.v.K0(r8-map-id-02fdf5f89272614ec878de7adda5f42926f9802f10b5d99996c77817a23b127e:5)
+	at ew.l.run(r8-map-id-02fdf5f89272614ec878de7adda5f42926f9802f10b5d99996c77817a23b127e:57)
+	at java.util.concurrent.ThreadPoolExecutor.runWorker(ThreadPoolExecutor.java:1291)
+	at java.util.concurrent.ThreadPoolExecutor$Worker.run(ThreadPoolExecutor.java:670)
+	at java.lang.Thread.run(Thread.java:1012)
+Caused by: kotlinx.serialization.MissingFieldException: Field 'restore' is required for type with serial name 'com.bitwarden.network.model.SyncResponseJson.Cipher.CipherPermissions', but it was missing
+	at wv.y0.l(r8-map-id-02fdf5f89272614ec878de7adda5f42926f9802f10b5d99996c77817a23b127e:40)
+	at com.bitwarden.network.model.SyncResponseJson$Cipher$CipherPermissions.<init>(r8-map-id-02fdf5f89272614ec878de7adda5f42926f9802f10b5d99996c77817a23b127e:1)
+	at com.bitwarden.network.model.SyncResponseJson$Cipher$CipherPermissions$$serializer.deserialize(r8-map-id-02fdf5f89272614ec878de7adda5f42926f9802f10b5d99996c77817a23b127e:1)
+	at com.bitwarden.network.model.SyncResponseJson$Cipher$CipherPermissions$$serializer.deserialize(r8-map-id-02fdf5f89272614ec878de7adda5f42926f9802f10b5d99996c77817a23b127e:2)
+	at yv.s.v(r8-map-id-02fdf5f89272614ec878de7adda5f42926f9802f10b5d99996c77817a23b127e:265)
+	... 22 more
+ – kotlinx.serialization.MissingFieldException: Field 'restore' is required for type with serial name 'com.bitwarden.network.model.SyncResponseJson.Cipher.CipherPermissions', but it was missing at path: $.ciphers[0].permissions
+	at yv.s.v(r8-map-id-02fdf5f89272614ec878de7adda5f42926f9802f10b5d99996c77817a23b127e:318)
+	at ee.b.w(r8-map-id-02fdf5f89272614ec878de7adda5f42926f9802f10b5d99996c77817a23b127e:30)
+	at com.bitwarden.network.model.SyncResponseJson$Cipher$$serializer.deserialize(r8-map-id-02fdf5f89272614ec878de7adda5f42926f9802f10b5d99996c77817a23b127e:1)
+	at com.bitwarden.network.model.SyncResponseJson$Cipher$$serializer.deserialize(r8-map-id-02fdf5f89272614ec878de7adda5f42926f9802f10b5d99996c77817a23b127e:2)
+	at yv.s.v(r8-map-id-02fdf5f89272614ec878de7adda5f42926f9802f10b5d99996c77817a23b127e:265)
+	at ee.b.z(r8-map-id-02fdf5f89272614ec878de7adda5f42926f9802f10b5d99996c77817a23b127e:11)
+	at yv.s.z(r8-map-id-02fdf5f89272614ec878de7adda5f42926f9802f10b5d99996c77817a23b127e:52)
+	at wv.r.f(r8-map-id-02fdf5f89272614ec878de7adda5f42926f9802f10b5d99996c77817a23b127e:10)
+	at wv.a.e(r8-map-id-02fdf5f89272614ec878de7adda5f42926f9802f10b5d99996c77817a23b127e:29)
+	at wv.a.deserialize(r8-map-id-02fdf5f89272614ec878de7adda5f42926f9802f10b5d99996c77817a23b127e:1)
+	at yv.s.v(r8-map-id-02fdf5f89272614ec878de7adda5f42926f9802f10b5d99996c77817a23b127e:265)
+	at ee.b.w(r8-map-id-02fdf5f89272614ec878de7adda5f42926f9802f10b5d99996c77817a23b127e:30)
+	at com.bitwarden.network.model.SyncResponseJson$$serializer.deserialize(r8-map-id-02fdf5f89272614ec878de7adda5f42926f9802f10b5d99996c77817a23b127e:1)
+	at com.bitwarden.network.model.SyncResponseJson$$serializer.deserialize(r8-map-id-02fdf5f89272614ec878de7adda5f42926f9802f10b5d99996c77817a23b127e:2)
+	at yv.s.v(r8-map-id-02fdf5f89272614ec878de7adda5f42926f9802f10b5d99996c77817a23b127e:265)
+	at xv.c.a(r8-map-id-02fdf5f89272614ec878de7adda5f42926f9802f10b5d99996c77817a23b127e:29)
+	at tw.v.r(r8-map-id-02fdf5f89272614ec878de7adda5f42926f9802f10b5d99996c77817a23b127e:34)
+	at tw.z.c(r8-map-id-02fdf5f89272614ec878de7adda5f42926f9802f10b5d99996c77817a23b127e:54)
+	at tw.v.K0(r8-map-id-02fdf5f89272614ec878de7adda5f42926f9802f10b5d99996c77817a23b127e:5)
+	at ew.l.run(r8-map-id-02fdf5f89272614ec878de7adda5f42926f9802f10b5d99996c77817a23b127e:57)
+	at java.util.concurrent.ThreadPoolExecutor.runWorker(ThreadPoolExecutor.java:1291)
+	at java.util.concurrent.ThreadPoolExecutor$Worker.run(ThreadPoolExecutor.java:670)
+	at java.lang.Thread.run(Thread.java:1012)
+Caused by: kotlinx.serialization.MissingFieldException: Field 'restore' is required for type with serial name 'com.bitwarden.network.model.SyncResponseJson.Cipher.CipherPermissions', but it was missing
+	at wv.y0.l(r8-map-id-02fdf5f89272614ec878de7adda5f42926f9802f10b5d99996c77817a23b127e:40)
+	at com.bitwarden.network.model.SyncResponseJson$Cipher$CipherPermissions.<init>(r8-map-id-02fdf5f89272614ec878de7adda5f42926f9802f10b5d99996c77817a23b127e:1)
+	at com.bitwarden.network.model.SyncResponseJson$Cipher$CipherPermissions$$serializer.deserialize(r8-map-id-02fdf5f89272614ec878de7adda5f42926f9802f10b5d99996c77817a23b127e:1)
+	at com.bitwarden.network.model.SyncResponseJson$Cipher$CipherPermissions$$serializer.deserialize(r8-map-id-02fdf5f89272614ec878de7adda5f42926f9802f10b5d99996c77817a23b127e:2)
+	at yv.s.v(r8-map-id-02fdf5f89272614ec878de7adda5f42926f9802f10b5d99996c77817a23b127e:265)
+	... 22 more
+
+2026-02-10 12:51:23:276 – DEBUG – a – VaultUnlockedNavBarScreen destination changed: com.x8bit.bitwarden.ui.platform.feature.settings.SettingsRoute$Standard/{encodedData} in com.x8bit.bitwarden.ui.platform.feature.settings.SettingsGraphRoute
+2026-02-10 12:51:27:471 – DEBUG – a – VaultUnlockedNavBarScreen destination changed: com.x8bit.bitwarden.ui.platform.feature.settings.about.SettingsAboutRoute.Standard in com.x8bit.bitwarden.ui.platform.feature.settings.SettingsGraphRoute
+2026-02-10 12:51:28:467 – DEBUG – a – RootNavScreen destination changed: com.x8bit.bitwarden.ui.platform.feature.settings.flightrecorder.recordedLogs.RecordedLogsRoute.Standard in com.x8bit.bitwarden.ui.platform.feature.vaultunlocked.VaultUnlockedGraphRoute
+2026-02-10 12:51:30:005 – DEBUG – a – RootNavScreen destination changed: com.x8bit.bitwarden.ui.platform.feature.vaultunlockednavbar.VaultUnlockedNavbarRoute in com.x8bit.bitwarden.ui.platform.feature.vaultunlocked.VaultUnlockedGraphRoute
+2026-02-10 12:51:30:035 – DEBUG – a – VaultUnlockedNavBarScreen destination changed: com.x8bit.bitwarden.ui.platform.feature.settings.about.SettingsAboutRoute.Standard in com.x8bit.bitwarden.ui.platform.feature.settings.SettingsGraphRoute
