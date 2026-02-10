@@ -160,6 +160,7 @@ impl Serialize for Cipher {
         response_map.insert("type".to_string(), json!(self.r#type));
         response_map.insert("favorite".to_string(), json!(self.favorite));
         response_map.insert("edit".to_string(), json!(self.edit));
+        response_map.insert("permissions".to_string(), json!({ "delete": self.edit }));
         response_map.insert("viewPassword".to_string(), json!(self.view_password));
         response_map.insert(
             "organizationUseTotp".to_string(),
@@ -239,6 +240,50 @@ fn default_object() -> String {
 
 fn default_true() -> bool {
     true
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Cipher;
+    use serde_json::{json, Value};
+
+    #[test]
+    fn cipher_serialization_includes_permissions_delete() {
+        let cipher = Cipher {
+            id: "test-id".to_string(),
+            user_id: Some("user-1".to_string()),
+            organization_id: None,
+            r#type: 1,
+            data: json!({
+                "name": "Example",
+                "notes": null,
+                "login": { "username": "u", "password": "p" }
+            }),
+            favorite: false,
+            folder_id: None,
+            deleted_at: None,
+            created_at: "2026-01-01T00:00:00.000Z".to_string(),
+            updated_at: "2026-01-01T00:00:00.000Z".to_string(),
+            object: "cipher".to_string(),
+            organization_use_totp: false,
+            edit: true,
+            view_password: true,
+            collection_ids: None,
+        };
+
+        let value = serde_json::to_value(cipher).expect("serialize cipher");
+
+        let permissions = value
+            .get("permissions")
+            .and_then(Value::as_object)
+            .expect("permissions object");
+
+        assert_eq!(
+            permissions.get("delete"),
+            Some(&Value::Bool(true)),
+            "permissions.delete must exist and be true when edit=true"
+        );
+    }
 }
 
 // Represents the "Cipher" object within the incoming request payload.
