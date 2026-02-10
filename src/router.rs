@@ -38,10 +38,25 @@ pub fn api_router(env: Env) -> Router {
         .route("/api/sync", get(sync::get_sync_data))
         // Ciphers CRUD
         .route("/api/ciphers/create", post(ciphers::create_cipher))
-        .route("/api/ciphers", post(ciphers::post_ciphers))
+        .route(
+            "/api/ciphers",
+            post(ciphers::post_ciphers).delete(ciphers::hard_delete_ciphers_delete),
+        )
         .route("/api/ciphers/import", post(import::import_data))
-        .route("/api/ciphers/{id}", put(ciphers::update_cipher))
-        .route("/api/ciphers/{id}/delete", put(ciphers::delete_cipher))
+        .route(
+            "/api/ciphers/{id}",
+            put(ciphers::update_cipher).delete(ciphers::hard_delete_cipher),
+        )
+        .route(
+            "/api/ciphers/{id}/delete",
+            put(ciphers::soft_delete_cipher).post(ciphers::hard_delete_cipher_post),
+        )
+        .route("/api/ciphers/{id}/restore", put(ciphers::restore_cipher))
+        .route(
+            "/api/ciphers/delete",
+            put(ciphers::soft_delete_ciphers).post(ciphers::hard_delete_ciphers),
+        )
+        .route("/api/ciphers/restore", put(ciphers::restore_ciphers))
         // Folders CRUD
         .route("/api/folders", post(folders::create_folder))
         .route("/api/folders/{id}", put(folders::update_folder))

@@ -160,7 +160,10 @@ impl Serialize for Cipher {
         response_map.insert("type".to_string(), json!(self.r#type));
         response_map.insert("favorite".to_string(), json!(self.favorite));
         response_map.insert("edit".to_string(), json!(self.edit));
-        response_map.insert("permissions".to_string(), json!({ "delete": self.edit }));
+        response_map.insert(
+            "permissions".to_string(),
+            json!({ "delete": self.edit, "restore": self.edit }),
+        );
         response_map.insert("viewPassword".to_string(), json!(self.view_password));
         response_map.insert(
             "organizationUseTotp".to_string(),
@@ -282,6 +285,11 @@ mod tests {
             permissions.get("delete"),
             Some(&Value::Bool(true)),
             "permissions.delete must exist and be true when edit=true"
+        );
+        assert_eq!(
+            permissions.get("restore"),
+            Some(&Value::Bool(true)),
+            "permissions.restore must exist and be true when edit=true"
         );
     }
 }
