@@ -12,7 +12,7 @@ pub fn api_router(env: Env) -> Router {
     let app_state = Arc::new(env);
 
     Router::new()
-        .route("/", get(|| async { Html(include_str!("../static/index.html")) }))
+        .route("/demo.html", get(|| async { Html(include_str!("../static/demo.html")) }))
         // Identity/Auth routes
         .route("/identity/accounts/prelogin", post(accounts::prelogin))
         .route("/api/accounts/prelogin", post(accounts::prelogin))
@@ -35,6 +35,13 @@ pub fn api_router(env: Env) -> Router {
         .route("/api/accounts/password", put(accounts::change_master_password))
         .route("/api/accounts/email", put(accounts::change_email))
         .route("/api/two-factor", get(two_factor::two_factor_status))
+        .route("/api/two-factor/get-authenticator", post(two_factor::get_authenticator))
+        .route(
+            "/api/two-factor/authenticator",
+            post(two_factor::activate_authenticator)
+                .put(two_factor::activate_authenticator_put)
+                .delete(two_factor::disable_authenticator_vw),
+        )
         .route("/api/two-factor/authenticator/request", post(two_factor::authenticator_request))
         .route("/api/two-factor/authenticator/enable", post(two_factor::authenticator_enable))
         .route("/api/two-factor/authenticator/disable", post(two_factor::authenticator_disable))

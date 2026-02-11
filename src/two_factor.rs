@@ -11,6 +11,12 @@ use crate::error::AppError;
 
 pub const TWO_FACTOR_PROVIDER_AUTHENTICATOR: i32 = 0;
 
+pub fn generate_totp_secret_base32_20() -> String {
+    let mut bytes = [0u8; 20];
+    OsRng.fill_bytes(&mut bytes);
+    Secret::Raw(bytes.to_vec()).to_encoded().to_string()
+}
+
 pub async fn ensure_two_factor_authenticator_table(db: &D1Database) -> Result<(), AppError> {
     db.prepare(
         "CREATE TABLE IF NOT EXISTS two_factor_authenticator (
@@ -193,4 +199,17 @@ pub fn verify_totp_code(secret_encoded: &str, token: &str) -> Result<bool, AppEr
     .map_err(|_| AppError::Internal)?;
     let unix_seconds = (Date::now() / 1000.0).floor() as u64;
     Ok(totp.check(token, unix_seconds))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::generate_totp_secret_base32_20;
+    use totp_rs::Secret;
+
+    #[test]
+    fn generated_totp_secret_is_20_bytes() {
+        let secret = generate_totp_secret_base32_20();
+        let bytes = Secret::Encoded(secret).to_bytes().expect("decode base32");
+        assert_eq!(bytes.len(), 20);
+    }
 }

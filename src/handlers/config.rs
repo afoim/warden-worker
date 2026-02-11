@@ -56,8 +56,7 @@ pub async fn config(headers: HeaderMap) -> Json<Value> {
           "vapidPublicKey": null
         },
         "featureStates": {
-            // "duo-redirect": true,
-            // "flexible-collections-v-1": false
+            "unauth-ui-refresh": true
         },
         "object": "config",
     }))

@@ -1,0 +1,644 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Warden Worker - Bitwarden 兼容服务器</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            margin: 0;
+            background-color: #f5f5f5;
+            color: #333;
+        }
+        .container {
+            text-align: center;
+            background: white;
+            padding: 3rem;
+            border-radius: 12px;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.08);
+            max-width: 500px;
+            width: 90%;
+        }
+        h1 {
+            color: #175ddc;
+            margin-bottom: 1rem;
+        }
+        p {
+            color: #666;
+            margin-bottom: 2rem;
+            line-height: 1.6;
+        }
+        .warning {
+            color: #d32f2f;
+            background-color: #ffebee;
+            padding: 1rem;
+            border-radius: 6px;
+            margin-top: 1.5rem;
+            font-size: 0.9rem;
+            text-align: left;
+        }
+        .btn {
+            display: inline-block;
+            background-color: #175ddc;
+            color: white;
+            padding: 0.85rem 2rem;
+            border-radius: 6px;
+            text-decoration: none;
+            font-weight: 500;
+            transition: background-color 0.2s;
+        }
+        .btn:hover {
+            background-color: #134dbb;
+        }
+        .footer {
+            margin-top: 2rem;
+            font-size: 0.85rem;
+            color: #999;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Warden Worker</h1>
+        <p>
+            这是一个运行在 Cloudflare Workers 上的 Bitwarden 兼容服务器。<br>
+            您可以使用官方 Bitwarden 客户端连接到此服务器。
+        </p>
+        
+        <div class="warning">
+            <strong>关于修改主密码</strong><br>
+            Bitwarden/Vaultwarden 的“网页端改主密码”本质是：明文密码只在浏览器里参与计算，服务端只接收派生出的 Hash 和新的受保护主密钥。<br>
+            为避免操作失误导致无法解密，请在修改前先做好导出备份。
+        </div>
+
+        <div class="warning" style="margin-top: 1rem;">
+            <strong>网页端修改主密码</strong><br>
+            只需要输入邮箱、旧密码、新密码（明文仅在浏览器内使用）。<br><br>
+            <div style="margin-top: 0.75rem;">
+                <div style="margin-bottom: 0.4rem; font-weight: 600;">邮箱</div>
+                <input id="email" type="text" placeholder="user@example.com" style="width: 100%; padding: 0.6rem; border-radius: 6px; border: 1px solid #ddd; box-sizing: border-box;">
+            </div>
+            <div style="margin-top: 0.75rem;">
+                <div style="margin-bottom: 0.4rem; font-weight: 600;">旧主密码</div>
+                <input id="oldPassword" type="password" placeholder="旧主密码" style="width: 100%; padding: 0.6rem; border-radius: 6px; border: 1px solid #ddd; box-sizing: border-box;">
+            </div>
+            <div style="margin-top: 0.75rem;">
+                <div style="margin-bottom: 0.4rem; font-weight: 600;">新主密码</div>
+                <input id="newPassword" type="password" placeholder="新主密码" style="width: 100%; padding: 0.6rem; border-radius: 6px; border: 1px solid #ddd; box-sizing: border-box;">
+            </div>
+            <div style="margin-top: 0.75rem;">
+                <div style="margin-bottom: 0.4rem; font-weight: 600;">主密码提示（可选）</div>
+                <input id="hint" type="text" placeholder="masterPasswordHint" style="width: 100%; padding: 0.6rem; border-radius: 6px; border: 1px solid #ddd; box-sizing: border-box;">
+            </div>
+            <div style="margin-top: 0.75rem;">
+                <a class="btn" href="#" id="submit">修改主密码</a>
+            </div>
+            <div id="result" style="margin-top: 0.75rem; white-space: pre-wrap; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace;"></div>
+        </div>
+
+        <div class="warning" style="margin-top: 1rem;">
+            <strong>网页端修改邮箱</strong><br>
+            只需要输入当前邮箱、新邮箱、主密码（明文仅在浏览器内使用）。<br><br>
+            <div style="margin-top: 0.75rem;">
+                <div style="margin-bottom: 0.4rem; font-weight: 600;">当前邮箱</div>
+                <input id="emailCurrent" type="text" placeholder="current@example.com" style="width: 100%; padding: 0.6rem; border-radius: 6px; border: 1px solid #ddd; box-sizing: border-box;">
+            </div>
+            <div style="margin-top: 0.75rem;">
+                <div style="margin-bottom: 0.4rem; font-weight: 600;">新邮箱</div>
+                <input id="emailNew" type="text" placeholder="new@example.com" style="width: 100%; padding: 0.6rem; border-radius: 6px; border: 1px solid #ddd; box-sizing: border-box;">
+            </div>
+            <div style="margin-top: 0.75rem;">
+                <div style="margin-bottom: 0.4rem; font-weight: 600;">主密码</div>
+                <input id="emailPassword" type="password" placeholder="主密码" style="width: 100%; padding: 0.6rem; border-radius: 6px; border: 1px solid #ddd; box-sizing: border-box;">
+            </div>
+            <div style="margin-top: 0.75rem;">
+                <a class="btn" href="#" id="submitEmail">修改邮箱</a>
+            </div>
+            <div id="resultEmail" style="margin-top: 0.75rem; white-space: pre-wrap; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace;"></div>
+        </div>
+
+        <div class="warning" style="margin-top: 1rem;">
+            <strong>登录二次验证（TOTP）</strong><br>
+            启用后，Bitwarden 客户端登录会要求输入 6 位验证码。<br><br>
+            <div style="margin-top: 0.75rem;">
+                <div style="margin-bottom: 0.4rem; font-weight: 600;">邮箱</div>
+                <input id="totpEmail" type="text" placeholder="user@example.com" style="width: 100%; padding: 0.6rem; border-radius: 6px; border: 1px solid #ddd; box-sizing: border-box;">
+            </div>
+            <div style="margin-top: 0.75rem;">
+                <div style="margin-bottom: 0.4rem; font-weight: 600;">主密码</div>
+                <input id="totpPassword" type="password" placeholder="主密码" style="width: 100%; padding: 0.6rem; border-radius: 6px; border: 1px solid #ddd; box-sizing: border-box;">
+            </div>
+            <div style="margin-top: 0.75rem;">
+                <a class="btn" href="#" id="totpRequest">生成密钥</a>
+            </div>
+            <div style="margin-top: 0.75rem;">
+                <div style="margin-bottom: 0.4rem; font-weight: 600;">Secret</div>
+                <input id="totpSecret" type="text" readonly style="width: 100%; padding: 0.6rem; border-radius: 6px; border: 1px solid #ddd; box-sizing: border-box;">
+            </div>
+            <div style="margin-top: 0.75rem;">
+                <div style="margin-bottom: 0.4rem; font-weight: 600;">otpauth</div>
+                <textarea id="totpOtpauth" rows="3" readonly style="width: 100%; padding: 0.6rem; border-radius: 6px; border: 1px solid #ddd; box-sizing: border-box; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace;"></textarea>
+            </div>
+            <div style="margin-top: 0.75rem;">
+                <div style="margin-bottom: 0.4rem; font-weight: 600;">二维码</div>
+                <img id="totpQr" alt="TOTP QR" style="width: 220px; height: 220px; background: white; border-radius: 8px; border: 1px solid #ddd;">
+            </div>
+            <div style="margin-top: 0.75rem;">
+                <div style="margin-bottom: 0.4rem; font-weight: 600;">验证码</div>
+                <input id="totpCode" type="text" placeholder="6 位验证码" style="width: 100%; padding: 0.6rem; border-radius: 6px; border: 1px solid #ddd; box-sizing: border-box;">
+            </div>
+            <div style="margin-top: 0.75rem; display: flex; gap: 0.75rem; justify-content: center; flex-wrap: wrap;">
+                <a class="btn" href="#" id="totpEnable">启用</a>
+                <a class="btn" href="#" id="totpDisable" style="background-color: #777;">禁用</a>
+            </div>
+            <div id="resultTotp" style="margin-top: 0.75rem; white-space: pre-wrap; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace;"></div>
+        </div>
+        
+        <div class="footer">
+            Powered by Warden Worker
+        </div>
+    </div>
+
+    <script>
+        const submitBtn = document.getElementById('submit');
+        const submitEmailBtn = document.getElementById('submitEmail');
+        const emailInput = document.getElementById('email');
+        const oldPasswordInput = document.getElementById('oldPassword');
+        const newPasswordInput = document.getElementById('newPassword');
+        const hintInput = document.getElementById('hint');
+        const resultEl = document.getElementById('result');
+        const emailCurrentInput = document.getElementById('emailCurrent');
+        const emailNewInput = document.getElementById('emailNew');
+        const emailPasswordInput = document.getElementById('emailPassword');
+        const resultEmailEl = document.getElementById('resultEmail');
+        const totpEmailInput = document.getElementById('totpEmail');
+        const totpPasswordInput = document.getElementById('totpPassword');
+        const totpRequestBtn = document.getElementById('totpRequest');
+        const totpEnableBtn = document.getElementById('totpEnable');
+        const totpDisableBtn = document.getElementById('totpDisable');
+        const totpSecretInput = document.getElementById('totpSecret');
+        const totpOtpauthInput = document.getElementById('totpOtpauth');
+        const totpQrImg = document.getElementById('totpQr');
+        const totpCodeInput = document.getElementById('totpCode');
+        const resultTotpEl = document.getElementById('resultTotp');
+
+        const encoder = new TextEncoder();
+
+        function concatBytes(a, b) {
+            const out = new Uint8Array(a.length + b.length);
+            out.set(a, 0);
+            out.set(b, a.length);
+            return out;
+        }
+
+        function b64encode(bytes) {
+            let binary = '';
+            const chunkSize = 0x8000;
+            for (let i = 0; i < bytes.length; i += chunkSize) {
+                const chunk = bytes.subarray(i, i + chunkSize);
+                binary += String.fromCharCode(...chunk);
+            }
+            return btoa(binary);
+        }
+
+        function b64decode(str) {
+            const binary = atob(str);
+            const out = new Uint8Array(binary.length);
+            for (let i = 0; i < binary.length; i++) {
+                out[i] = binary.charCodeAt(i);
+            }
+            return out;
+        }
+
+        function pkcs7Pad(bytes, blockSize) {
+            const padLen = blockSize - (bytes.length % blockSize);
+            const out = new Uint8Array(bytes.length + padLen);
+            out.set(bytes, 0);
+            out.fill(padLen, bytes.length);
+            return out;
+        }
+
+        function pkcs7Unpad(bytes) {
+            if (bytes.length === 0) throw new Error('Invalid padding');
+            const padLen = bytes[bytes.length - 1];
+            if (padLen <= 0 || padLen > 16) throw new Error('Invalid padding');
+            for (let i = bytes.length - padLen; i < bytes.length; i++) {
+                if (bytes[i] !== padLen) throw new Error('Invalid padding');
+            }
+            return bytes.subarray(0, bytes.length - padLen);
+        }
+
+        async function pbkdf2Sha256(passwordBytes, saltBytes, iterations, lengthBytes) {
+            const keyMaterial = await crypto.subtle.importKey(
+                'raw',
+                passwordBytes,
+                'PBKDF2',
+                false,
+                ['deriveBits']
+            );
+            const bits = await crypto.subtle.deriveBits(
+                {
+                    name: 'PBKDF2',
+                    salt: saltBytes,
+                    iterations,
+                    hash: 'SHA-256'
+                },
+                keyMaterial,
+                lengthBytes * 8
+            );
+            return new Uint8Array(bits);
+        }
+
+        async function hkdfExpandSha256(prkBytes, infoBytes, lengthBytes) {
+            if (lengthBytes > 32) {
+                throw new Error('HKDF-Expand length too large for this implementation');
+            }
+            const infoWithCounter = concatBytes(infoBytes, new Uint8Array([1]));
+            const okm = await hmacSha256(prkBytes, infoWithCounter);
+            return okm.subarray(0, lengthBytes);
+        }
+
+        async function stretchMasterKey(masterKeyBytes) {
+            const encKey = await hkdfExpandSha256(masterKeyBytes, encoder.encode('enc'), 32);
+            const macKey = await hkdfExpandSha256(masterKeyBytes, encoder.encode('mac'), 32);
+            return { encKey, macKey };
+        }
+
+        async function hmacSha256(macKeyBytes, dataBytes) {
+            const key = await crypto.subtle.importKey(
+                'raw',
+                macKeyBytes,
+                { name: 'HMAC', hash: 'SHA-256' },
+                false,
+                ['sign', 'verify']
+            );
+            const sig = await crypto.subtle.sign('HMAC', key, dataBytes);
+            return new Uint8Array(sig);
+        }
+
+        async function hmacVerifySha256(macKeyBytes, dataBytes, signatureBytes) {
+            const key = await crypto.subtle.importKey(
+                'raw',
+                macKeyBytes,
+                { name: 'HMAC', hash: 'SHA-256' },
+                false,
+                ['verify']
+            );
+            return await crypto.subtle.verify('HMAC', key, signatureBytes, dataBytes);
+        }
+
+        async function aesCbcEncrypt(encKeyBytes, ivBytes, plainBytes) {
+            const key = await crypto.subtle.importKey('raw', encKeyBytes, { name: 'AES-CBC' }, false, ['encrypt']);
+            const ct = await crypto.subtle.encrypt({ name: 'AES-CBC', iv: ivBytes }, key, plainBytes);
+            return new Uint8Array(ct);
+        }
+
+        async function aesCbcDecrypt(encKeyBytes, ivBytes, cipherBytes) {
+            const key = await crypto.subtle.importKey('raw', encKeyBytes, { name: 'AES-CBC' }, false, ['decrypt']);
+            const pt = await crypto.subtle.decrypt({ name: 'AES-CBC', iv: ivBytes }, key, cipherBytes);
+            return new Uint8Array(pt);
+        }
+
+        async function decryptEncString(encString, encKeyBytes, macKeyBytes) {
+            const parts = encString.split('.', 2);
+            if (parts.length !== 2) throw new Error('Invalid encString');
+            const encType = parts[0];
+            if (encType !== '2') throw new Error(`Unsupported encType: ${encType}`);
+            const payload = parts[1].split('|');
+            if (payload.length !== 3) throw new Error('Invalid encString payload');
+            const iv = b64decode(payload[0]);
+            const ct = b64decode(payload[1]);
+            const mac = b64decode(payload[2]);
+            const dataToMac = concatBytes(iv, ct);
+            const ok = await hmacVerifySha256(macKeyBytes, dataToMac, mac);
+            if (!ok) throw new Error('MAC 校验失败（旧主密码可能不正确）');
+            const raw = await aesCbcDecrypt(encKeyBytes, iv, ct);
+            try {
+                return { plainBytes: pkcs7Unpad(raw), usedPadding: true, ivLen: iv.length, ctLen: ct.length, macLen: mac.length };
+            } catch {
+                return { plainBytes: raw, usedPadding: false, ivLen: iv.length, ctLen: ct.length, macLen: mac.length };
+            }
+        }
+
+        async function encryptEncString(plainBytes, encKeyBytes, macKeyBytes, usePadding) {
+            const iv = crypto.getRandomValues(new Uint8Array(16));
+            const input = usePadding ? pkcs7Pad(plainBytes, 16) : plainBytes;
+            const ct = await aesCbcEncrypt(encKeyBytes, iv, input);
+            const mac = await hmacSha256(macKeyBytes, concatBytes(iv, ct));
+            return `2.${b64encode(iv)}|${b64encode(ct)}|${b64encode(mac)}`;
+        }
+
+        async function deriveMasterKey(email, password, kdfIterations) {
+            const salt = encoder.encode(email.toLowerCase());
+            const pw = encoder.encode(password);
+            return await pbkdf2Sha256(pw, salt, kdfIterations, 32);
+        }
+
+        async function deriveMasterPasswordHash(masterKeyBytes, password) {
+            const pw = encoder.encode(password);
+            const hash = await pbkdf2Sha256(masterKeyBytes, pw, 1, 32);
+            return b64encode(hash);
+        }
+
+        async function prelogin(email) {
+            const preloginResp = await fetch('/identity/accounts/prelogin', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ email })
+            });
+            const preloginText = await preloginResp.text();
+            if (!preloginResp.ok) {
+                throw new Error(`prelogin 失败 HTTP ${preloginResp.status}\n${preloginText}`);
+            }
+            const preloginJson = JSON.parse(preloginText);
+            return preloginJson.kdfIterations;
+        }
+
+        async function login(email, masterPasswordHash) {
+            const form = new URLSearchParams();
+            form.set('grant_type', 'password');
+            form.set('username', email);
+            form.set('password', masterPasswordHash);
+            const tokenResp = await fetch('/identity/connect/token', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                body: form.toString()
+            });
+            const tokenText = await tokenResp.text();
+            if (!tokenResp.ok) {
+                throw new Error(`登录失败 HTTP ${tokenResp.status}\n${tokenText}`);
+            }
+            return JSON.parse(tokenText);
+        }
+
+        submitBtn.addEventListener('click', async (e) => {
+            e.preventDefault();
+            resultEl.textContent = '';
+
+            try {
+                const email = emailInput.value.trim();
+                const oldPassword = oldPasswordInput.value;
+                const newPassword = newPasswordInput.value;
+                const hint = hintInput.value.trim();
+
+                if (!email || !oldPassword || !newPassword) {
+                    resultEl.textContent = '请填写邮箱、旧主密码、新主密码';
+                    return;
+                }
+                if (oldPassword === newPassword) {
+                    resultEl.textContent = '新旧主密码不能相同';
+                    return;
+                }
+
+                resultEl.textContent = '读取 KDF 参数...';
+                const kdfIterations = await prelogin(email);
+
+                resultEl.textContent = '派生旧主密码哈希并登录...';
+                const oldMasterKey = await deriveMasterKey(email, oldPassword, kdfIterations);
+                const oldMasterPasswordHash = await deriveMasterPasswordHash(oldMasterKey, oldPassword);
+
+                const tokenJson = await login(email, oldMasterPasswordHash);
+                const accessToken = tokenJson.access_token;
+                const protectedSymmetricKey = tokenJson.Key;
+
+                resultEl.textContent = '解密并用新主密码重新加密用户密钥...';
+                const oldStretched = await stretchMasterKey(oldMasterKey);
+                const decrypted = await decryptEncString(protectedSymmetricKey, oldStretched.encKey, oldStretched.macKey);
+                const symmetricKeyPlain = decrypted.plainBytes;
+
+                const newMasterKey = await deriveMasterKey(email, newPassword, kdfIterations);
+                const newMasterPasswordHash = await deriveMasterPasswordHash(newMasterKey, newPassword);
+                const newStretched = await stretchMasterKey(newMasterKey);
+                const newProtectedSymmetricKey = await encryptEncString(
+                    symmetricKeyPlain,
+                    newStretched.encKey,
+                    newStretched.macKey,
+                    decrypted.usedPadding
+                );
+
+                resultEl.textContent = '提交修改...';
+                const changeResp = await fetch('/api/accounts/password', {
+                    method: 'PUT',
+                    headers: {
+                        'Authorization': `Bearer ${accessToken}`,
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        masterPasswordHash: oldMasterPasswordHash,
+                        newMasterPasswordHash: newMasterPasswordHash,
+                        masterPasswordHint: hint ? hint : null,
+                        userSymmetricKey: newProtectedSymmetricKey,
+                        kdf: 0,
+                        kdfIterations: kdfIterations
+                    })
+                });
+                const changeText = await changeResp.text();
+                if (!changeResp.ok) {
+                    resultEl.textContent = `修改失败 HTTP ${changeResp.status}\n${changeText}`;
+                    return;
+                }
+
+                resultEl.textContent = `修改成功（Key: iv=${decrypted.ivLen} ct=${decrypted.ctLen} mac=${decrypted.macLen} padding=${decrypted.usedPadding ? 'pkcs7' : 'none'}）。请在客户端重新登录/解锁。`;
+            } catch (err) {
+                resultEl.textContent = String(err);
+            }
+        });
+
+        submitEmailBtn.addEventListener('click', async (e) => {
+            e.preventDefault();
+            resultEmailEl.textContent = '';
+
+            try {
+                const emailCurrent = emailCurrentInput.value.trim();
+                const emailNew = emailNewInput.value.trim();
+                const password = emailPasswordInput.value;
+
+                if (!emailCurrent || !emailNew || !password) {
+                    resultEmailEl.textContent = '请填写当前邮箱、新邮箱、主密码';
+                    return;
+                }
+                if (emailCurrent.toLowerCase() === emailNew.toLowerCase()) {
+                    resultEmailEl.textContent = '新旧邮箱不能相同';
+                    return;
+                }
+
+                resultEmailEl.textContent = '读取 KDF 参数...';
+                const kdfIterations = await prelogin(emailCurrent);
+
+                resultEmailEl.textContent = '派生旧邮箱的主密码哈希并登录...';
+                const oldMasterKey = await deriveMasterKey(emailCurrent, password, kdfIterations);
+                const oldMasterPasswordHash = await deriveMasterPasswordHash(oldMasterKey, password);
+                const tokenJson = await login(emailCurrent, oldMasterPasswordHash);
+                const accessToken = tokenJson.access_token;
+                const protectedSymmetricKey = tokenJson.Key;
+
+                resultEmailEl.textContent = '解密并用新邮箱重新加密用户密钥...';
+                const oldStretched = await stretchMasterKey(oldMasterKey);
+                const decrypted = await decryptEncString(protectedSymmetricKey, oldStretched.encKey, oldStretched.macKey);
+                const symmetricKeyPlain = decrypted.plainBytes;
+
+                const newMasterKey = await deriveMasterKey(emailNew, password, kdfIterations);
+                const newMasterPasswordHash = await deriveMasterPasswordHash(newMasterKey, password);
+                const newStretched = await stretchMasterKey(newMasterKey);
+                const newProtectedSymmetricKey = await encryptEncString(
+                    symmetricKeyPlain,
+                    newStretched.encKey,
+                    newStretched.macKey,
+                    decrypted.usedPadding
+                );
+
+                resultEmailEl.textContent = '提交修改...';
+                const changeResp = await fetch('/api/accounts/email', {
+                    method: 'PUT',
+                    headers: {
+                        'Authorization': `Bearer ${accessToken}`,
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        masterPasswordHash: oldMasterPasswordHash,
+                        newMasterPasswordHash: newMasterPasswordHash,
+                        newEmail: emailNew,
+                        userSymmetricKey: newProtectedSymmetricKey,
+                        kdf: 0,
+                        kdfIterations: kdfIterations
+                    })
+                });
+                const changeText = await changeResp.text();
+                if (!changeResp.ok) {
+                    resultEmailEl.textContent = `修改失败 HTTP ${changeResp.status}\n${changeText}`;
+                    return;
+                }
+
+                resultEmailEl.textContent = `修改成功（Key: iv=${decrypted.ivLen} ct=${decrypted.ctLen} mac=${decrypted.macLen} padding=${decrypted.usedPadding ? 'pkcs7' : 'none'}）。请使用新邮箱重新登录。`;
+            } catch (err) {
+                resultEmailEl.textContent = String(err);
+            }
+        });
+
+        let totpAccessToken = null;
+
+        totpRequestBtn.addEventListener('click', async (e) => {
+            e.preventDefault();
+            resultTotpEl.textContent = '';
+            totpSecretInput.value = '';
+            totpOtpauthInput.value = '';
+            totpQrImg.removeAttribute('src');
+            totpAccessToken = null;
+
+            try {
+                const email = totpEmailInput.value.trim();
+                const password = totpPasswordInput.value;
+                if (!email || !password) {
+                    resultTotpEl.textContent = '请填写邮箱与主密码';
+                    return;
+                }
+
+                resultTotpEl.textContent = '读取 KDF 参数...';
+                const kdfIterations = await prelogin(email);
+                const masterKey = await deriveMasterKey(email, password, kdfIterations);
+                const masterPasswordHash = await deriveMasterPasswordHash(masterKey, password);
+
+                resultTotpEl.textContent = '登录获取授权...';
+                const tokenJson = await login(email, masterPasswordHash);
+                totpAccessToken = tokenJson.access_token;
+
+                resultTotpEl.textContent = '生成 TOTP 密钥...';
+                const resp = await fetch('/api/two-factor/authenticator/request', {
+                    method: 'POST',
+                    headers: { 'Authorization': `Bearer ${totpAccessToken}` }
+                });
+                const text = await resp.text();
+                if (!resp.ok) {
+                    resultTotpEl.textContent = `请求失败 HTTP ${resp.status}\n${text}`;
+                    return;
+                }
+                const data = JSON.parse(text);
+                totpSecretInput.value = data.secret || '';
+                totpOtpauthInput.value = data.otpauth || '';
+                if (data.qrBase64) {
+                    totpQrImg.setAttribute('src', `data:image/png;base64,${data.qrBase64}`);
+                } else {
+                    totpQrImg.removeAttribute('src');
+                }
+                resultTotpEl.textContent = '密钥已生成。请在认证器 App 中添加后输入验证码并点击“启用”。';
+            } catch (err) {
+                resultTotpEl.textContent = String(err);
+            }
+        });
+
+        totpEnableBtn.addEventListener('click', async (e) => {
+            e.preventDefault();
+            resultTotpEl.textContent = '';
+
+            try {
+                if (!totpAccessToken) {
+                    resultTotpEl.textContent = '请先点击“生成密钥”';
+                    return;
+                }
+                const code = totpCodeInput.value.trim();
+                if (!code) {
+                    resultTotpEl.textContent = '请输入验证码';
+                    return;
+                }
+
+                const resp = await fetch('/api/two-factor/authenticator/enable', {
+                    method: 'POST',
+                    headers: {
+                        'Authorization': `Bearer ${totpAccessToken}`,
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ code })
+                });
+                const text = await resp.text();
+                if (!resp.ok) {
+                    resultTotpEl.textContent = `启用失败 HTTP ${resp.status}\n${text}`;
+                    return;
+                }
+                resultTotpEl.textContent = '启用成功。之后 Bitwarden 客户端登录会要求输入验证码。';
+            } catch (err) {
+                resultTotpEl.textContent = String(err);
+            }
+        });
+
+        totpDisableBtn.addEventListener('click', async (e) => {
+            e.preventDefault();
+            resultTotpEl.textContent = '';
+
+            try {
+                if (!totpAccessToken) {
+                    resultTotpEl.textContent = '请先填写邮箱与主密码并点击“生成密钥”获取授权';
+                    return;
+                }
+                const code = totpCodeInput.value.trim();
+                if (!code) {
+                    resultTotpEl.textContent = '请输入验证码';
+                    return;
+                }
+
+                const resp = await fetch('/api/two-factor/authenticator/disable', {
+                    method: 'POST',
+                    headers: {
+                        'Authorization': `Bearer ${totpAccessToken}`,
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ code })
+                });
+                const text = await resp.text();
+                if (!resp.ok) {
+                    resultTotpEl.textContent = `禁用失败 HTTP ${resp.status}\n${text}`;
+                    return;
+                }
+                resultTotpEl.textContent = '禁用成功。';
+            } catch (err) {
+                resultTotpEl.textContent = String(err);
+            }
+        });
+    </script>
+</body>
+</html>
