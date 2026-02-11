@@ -29,7 +29,7 @@ web-sys = { version = "0.3", features = ["Crypto", "CryptoKey", "SubtleCrypto", 
 console_error_panic_hook = "0.1.7"
 
 # Axum and Routing
-axum = { version = "0.8", default-features = false, features=["json", "macros", "form"] }
+axum = { version = "0.8", default-features = false, features=["json", "macros", "form", "multipart", "query"] }
 tower-service = "0.3"
 tower-http = { version = "0.5", features = ["cors"] }
 

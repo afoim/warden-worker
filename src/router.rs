@@ -6,7 +6,7 @@ use axum::{
 use std::sync::Arc;
 use worker::Env;
 
-use crate::handlers::{accounts, ciphers, config, identity, sync, folders, import, two_factor, devices};
+use crate::handlers::{accounts, ciphers, config, identity, sync, folders, import, two_factor, devices, sends};
 
 pub fn api_router(env: Env) -> Router {
     let app_state = Arc::new(env);
@@ -45,6 +45,23 @@ pub fn api_router(env: Env) -> Router {
         .route("/api/two-factor/authenticator/request", post(two_factor::authenticator_request))
         .route("/api/two-factor/authenticator/enable", post(two_factor::authenticator_enable))
         .route("/api/two-factor/authenticator/disable", post(two_factor::authenticator_disable))
+        .route("/api/sends", get(sends::get_sends).post(sends::post_send))
+        .route("/api/sends/file/v2", post(sends::post_send_file_v2))
+        .route("/api/sends/access/{access_id}", post(sends::post_access))
+        .route(
+            "/api/sends/{send_id}",
+            get(sends::get_send).delete(sends::delete_send),
+        )
+        .route(
+            "/api/sends/{send_id}/access/file/{file_id}",
+            post(sends::post_access_file),
+        )
+        .route("/api/sends/{send_id}/{file_id}", get(sends::download_send))
+        .route(
+            "/api/sends/{send_id}/file/{file_id}",
+            post(sends::post_send_file_v2_data),
+        )
+        .route("/sends/{send_id}/file/{file_id}", post(sends::post_send_file_v2_data))
         // Main data sync route
         .route("/api/sync", get(sync::get_sync_data))
         // Ciphers CRUD
