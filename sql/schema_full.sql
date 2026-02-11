@@ -7,6 +7,7 @@ DROP TABLE IF EXISTS devices;
 DROP TABLE IF EXISTS two_factor_authenticator;
 DROP TABLE IF EXISTS folders;
 DROP TABLE IF EXISTS ciphers;
+DROP TABLE IF EXISTS send_file_chunks;
 DROP TABLE IF EXISTS send_files;
 DROP TABLE IF EXISTS sends;
 DROP TABLE IF EXISTS users;
@@ -89,6 +90,16 @@ CREATE TABLE IF NOT EXISTS send_files (
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 );
 
+CREATE TABLE IF NOT EXISTS send_file_chunks (
+    send_file_id TEXT NOT NULL,
+    chunk_index INTEGER NOT NULL,
+    data_base64 TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY (send_file_id, chunk_index),
+    FOREIGN KEY (send_file_id) REFERENCES send_files(id) ON DELETE CASCADE
+);
+
 CREATE TABLE IF NOT EXISTS two_factor_authenticator (
     user_id TEXT PRIMARY KEY NOT NULL,
     enabled BOOLEAN NOT NULL DEFAULT 0,
@@ -116,5 +127,6 @@ CREATE INDEX IF NOT EXISTS idx_ciphers_folder_id ON ciphers(folder_id);
 CREATE INDEX IF NOT EXISTS idx_sends_user_id ON sends(user_id);
 CREATE INDEX IF NOT EXISTS idx_sends_deletion_date ON sends(deletion_date);
 CREATE INDEX IF NOT EXISTS idx_send_files_send_id ON send_files(send_id);
+CREATE INDEX IF NOT EXISTS idx_send_file_chunks_send_file_id ON send_file_chunks(send_file_id);
 CREATE INDEX IF NOT EXISTS idx_folders_user_id ON folders(user_id);
 CREATE INDEX IF NOT EXISTS idx_devices_user_id ON devices(user_id);

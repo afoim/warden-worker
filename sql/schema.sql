@@ -1,6 +1,7 @@
 -- Drop tables if they exist to ensure a clean slate
 DROP TABLE IF EXISTS folders;
 DROP TABLE IF EXISTS ciphers;
+DROP TABLE IF EXISTS send_file_chunks;
 DROP TABLE IF EXISTS send_files;
 DROP TABLE IF EXISTS sends;
 DROP TABLE IF EXISTS two_factor_authenticator;
@@ -81,6 +82,18 @@ CREATE TABLE IF NOT EXISTS send_files (
 );
 
 CREATE INDEX IF NOT EXISTS idx_send_files_send_id ON send_files(send_id);
+
+CREATE TABLE IF NOT EXISTS send_file_chunks (
+    send_file_id TEXT NOT NULL,
+    chunk_index INTEGER NOT NULL,
+    data_base64 TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY (send_file_id, chunk_index),
+    FOREIGN KEY (send_file_id) REFERENCES send_files(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_send_file_chunks_send_file_id ON send_file_chunks(send_file_id);
 
 -- Folders table for organizing ciphers
 CREATE TABLE IF NOT EXISTS folders (

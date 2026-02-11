@@ -3,10 +3,11 @@ use axum::{
     Router,
     response::Html,
 };
+use axum::extract::DefaultBodyLimit;
 use std::sync::Arc;
 use worker::Env;
 
-use crate::handlers::{accounts, ciphers, config, identity, sync, folders, import, two_factor, devices, sends};
+use crate::handlers::{accounts, ciphers, config, identity, sync, folders, import, two_factor, devices, sends, usage};
 
 pub fn api_router(env: Env) -> Router {
     let app_state = Arc::new(env);
@@ -59,9 +60,14 @@ pub fn api_router(env: Env) -> Router {
         .route("/api/sends/{send_id}/{file_id}", get(sends::download_send))
         .route(
             "/api/sends/{send_id}/file/{file_id}",
-            post(sends::post_send_file_v2_data),
+            post(sends::post_send_file_v2_data)
+                .layer(DefaultBodyLimit::max(100 * 1024 * 1024)),
         )
-        .route("/sends/{send_id}/file/{file_id}", post(sends::post_send_file_v2_data))
+        .route(
+            "/sends/{send_id}/file/{file_id}",
+            post(sends::post_send_file_v2_data)
+                .layer(DefaultBodyLimit::max(100 * 1024 * 1024)),
+        )
         // Main data sync route
         .route("/api/sync", get(sync::get_sync_data))
         // Ciphers CRUD
@@ -94,5 +100,6 @@ pub fn api_router(env: Env) -> Router {
         .route("/api/now", get(config::now))
         .route("/api/version", get(config::version))
         .route("/api/webauthn", get(config::webauthn))
+        .route("/api/d1/usage", get(usage::d1_usage))
         .with_state(app_state)
 }

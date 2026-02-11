@@ -8,3 +8,4 @@ pub mod import;
 pub mod two_factor;
 pub mod devices;
 pub mod sends;
+pub mod usage;

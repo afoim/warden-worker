@@ -159,6 +159,15 @@
             </div>
             <div id="resultTotp" style="margin-top: 0.75rem; white-space: pre-wrap; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace;"></div>
         </div>
+
+        <div class="warning" style="margin-top: 1rem;">
+            <strong>D1 占用情况</strong><br>
+            展示当前 D1 按项目分类的文本占用估算（最大 500MB）。<br><br>
+            <div style="margin-top: 0.75rem;">
+                <a class="btn" href="#" id="usageRefresh">刷新占用</a>
+            </div>
+            <div id="resultUsage" style="margin-top: 0.75rem; white-space: pre-wrap; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace;"></div>
+        </div>
         
         <div class="footer">
             Powered by Warden Worker
@@ -187,6 +196,8 @@
         const totpQrImg = document.getElementById('totpQr');
         const totpCodeInput = document.getElementById('totpCode');
         const resultTotpEl = document.getElementById('resultTotp');
+        const usageRefreshBtn = document.getElementById('usageRefresh');
+        const resultUsageEl = document.getElementById('resultUsage');
 
         const encoder = new TextEncoder();
 
@@ -232,6 +243,17 @@
                 if (bytes[i] !== padLen) throw new Error('Invalid padding');
             }
             return bytes.subarray(0, bytes.length - padLen);
+        }
+
+        function formatBytes(bytes) {
+            if (!Number.isFinite(bytes)) return String(bytes);
+            if (bytes < 1024) return `${bytes} B`;
+            const kb = bytes / 1024;
+            if (kb < 1024) return `${kb.toFixed(1)} KB`;
+            const mb = kb / 1024;
+            if (mb < 1024) return `${mb.toFixed(1)} MB`;
+            const gb = mb / 1024;
+            return `${gb.toFixed(2)} GB`;
         }
 
         async function pbkdf2Sha256(passwordBytes, saltBytes, iterations, lengthBytes) {
@@ -637,6 +659,31 @@
                 resultTotpEl.textContent = '禁用成功。';
             } catch (err) {
                 resultTotpEl.textContent = String(err);
+            }
+        });
+
+        usageRefreshBtn.addEventListener('click', async (e) => {
+            e.preventDefault();
+            resultUsageEl.textContent = '';
+
+            try {
+                resultUsageEl.textContent = '加载中...';
+                const resp = await fetch('/api/d1/usage');
+                const text = await resp.text();
+                if (!resp.ok) {
+                    resultUsageEl.textContent = `请求失败 HTTP ${resp.status}\n${text}`;
+                    return;
+                }
+                const data = JSON.parse(text);
+                const lines = [];
+                lines.push(`总占用: ${formatBytes(data.totalBytes)} / ${formatBytes(data.maxBytes)} (${(data.totalPercent || 0).toFixed(2)}%)`);
+                lines.push('');
+                for (const item of (data.items || [])) {
+                    lines.push(`${item.name || item.key}: ${formatBytes(item.bytes)}`);
+                }
+                resultUsageEl.textContent = lines.join('\n');
+            } catch (err) {
+                resultUsageEl.textContent = String(err);
             }
         });
     </script>

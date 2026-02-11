@@ -1,5 +1,4 @@
 use axum::{
-    body::Bytes,
     extract::{Multipart, Path, Query, State},
     http::StatusCode,
     response::Response,
@@ -25,6 +24,8 @@ use crate::{
         SendData, SendFileDBModel, SEND_TYPE_FILE, SEND_TYPE_TEXT,
     },
 };
+
+const SEND_FILE_B64_CHUNK_LEN: usize = 1_500_000;
 
 fn now_rfc3339_millis() -> String {
     Utc::now()
@@ -237,6 +238,16 @@ pub async fn delete_send(
     if owned.r#type == SEND_TYPE_FILE {
         query!(
             &db,
+            "DELETE FROM send_file_chunks WHERE send_file_id IN (SELECT id FROM send_files WHERE send_id = ?1 AND user_id = ?2)",
+            send_id,
+            claims.sub
+        )
+        .map_err(|_| AppError::Database)?
+        .run()
+        .await?;
+
+        query!(
+            &db,
             "DELETE FROM send_files WHERE send_id = ?1 AND user_id = ?2",
             send_id,
             claims.sub
@@ -438,35 +449,165 @@ pub async fn post_send_file_v2_data(
         return Err(AppError::BadRequest("Send content is not a file".to_string()));
     }
 
-    let mut file_bytes: Option<Bytes> = None;
-    while let Some(field) = multipart.next_field().await.map_err(|_| AppError::BadRequest("Invalid multipart".to_string()))? {
-        let name = field.name().unwrap_or("").to_string();
-        if name == "data" {
-            let bytes = field.bytes().await.map_err(|_| AppError::BadRequest("Invalid multipart data".to_string()))?;
-            file_bytes = Some(bytes);
-            break;
-        }
+    let size: Option<i64> = db
+        .prepare("SELECT size FROM send_files WHERE id = ?1 AND send_id = ?2 AND user_id = ?3 LIMIT 1")
+        .bind(&[file_id.clone().into(), send_id.clone().into(), claims.sub.clone().into()])?
+        .first(Some("size"))
+        .await
+        .map_err(|_| AppError::Database)?;
+    let size = size.ok_or_else(|| AppError::NotFound("Send not found. Unable to save the file.".to_string()))?;
+    if size < 0 {
+        return Err(AppError::BadRequest("Send size can't be negative".to_string()));
     }
 
-    let Some(file_bytes) = file_bytes else {
-        return Err(AppError::BadRequest("Missing file data".to_string()));
-    };
-
     let now = now_rfc3339_millis();
-    let data_b64 = general_purpose::STANDARD.encode(&file_bytes);
 
-    query!(
-        &db,
-        "UPDATE send_files SET data_base64 = ?1, updated_at = ?2 WHERE id = ?3 AND send_id = ?4 AND user_id = ?5",
-        data_b64,
-        now,
-        file_id,
-        send_id,
-        claims.sub
-    )
-    .map_err(|_| AppError::Database)?
-    .run()
-    .await?;
+    let estimated_b64_len: usize = ((size as usize + 2) / 3) * 4;
+    let should_inline = estimated_b64_len <= SEND_FILE_B64_CHUNK_LEN;
+
+    let mut uploaded = false;
+    while let Some(mut field) = multipart
+        .next_field()
+        .await
+        .map_err(|_| AppError::BadRequest("Invalid multipart".to_string()))?
+    {
+        let name = field.name().unwrap_or("").to_string();
+        if name != "data" {
+            continue;
+        }
+
+        uploaded = true;
+
+        if should_inline {
+            let mut carry: Vec<u8> = Vec::with_capacity(2);
+            let mut data_b64 = String::new();
+            while let Some(chunk) = field
+                .chunk()
+                .await
+                .map_err(|e| AppError::BadRequest(format!("Invalid multipart data: {e}")))?
+            {
+                let mut combined = Vec::with_capacity(carry.len() + chunk.len());
+                combined.extend_from_slice(&carry);
+                combined.extend_from_slice(&chunk);
+
+                let full_len = (combined.len() / 3) * 3;
+                if full_len > 0 {
+                    data_b64.push_str(&general_purpose::STANDARD.encode(&combined[..full_len]));
+                }
+                carry.clear();
+                carry.extend_from_slice(&combined[full_len..]);
+            }
+            if !carry.is_empty() {
+                data_b64.push_str(&general_purpose::STANDARD.encode(&carry));
+            }
+
+            query!(
+                &db,
+                "UPDATE send_files SET data_base64 = ?1, updated_at = ?2 WHERE id = ?3 AND send_id = ?4 AND user_id = ?5",
+                data_b64,
+                now,
+                file_id,
+                send_id,
+                claims.sub
+            )
+            .map_err(|_| AppError::Database)?
+            .run()
+            .await?;
+
+            query!(
+                &db,
+                "DELETE FROM send_file_chunks WHERE send_file_id = ?1",
+                file_id
+            )
+            .map_err(|_| AppError::Database)?
+            .run()
+            .await?;
+        } else {
+            query!(
+                &db,
+                "UPDATE send_files SET data_base64 = NULL, updated_at = ?1 WHERE id = ?2 AND send_id = ?3 AND user_id = ?4",
+                now,
+                file_id,
+                send_id,
+                claims.sub
+            )
+            .map_err(|_| AppError::Database)?
+            .run()
+            .await?;
+
+            query!(
+                &db,
+                "DELETE FROM send_file_chunks WHERE send_file_id = ?1",
+                file_id
+            )
+            .map_err(|_| AppError::Database)?
+            .run()
+            .await?;
+
+            let mut carry: Vec<u8> = Vec::with_capacity(2);
+            let mut b64_buf = String::new();
+            let mut chunk_index: i32 = 0;
+
+            while let Some(chunk) = field
+                .chunk()
+                .await
+                .map_err(|e| AppError::BadRequest(format!("Invalid multipart data: {e}")))?
+            {
+                let mut combined = Vec::with_capacity(carry.len() + chunk.len());
+                combined.extend_from_slice(&carry);
+                combined.extend_from_slice(&chunk);
+
+                let full_len = (combined.len() / 3) * 3;
+                if full_len > 0 {
+                    b64_buf.push_str(&general_purpose::STANDARD.encode(&combined[..full_len]));
+                }
+                carry.clear();
+                carry.extend_from_slice(&combined[full_len..]);
+
+                while b64_buf.len() >= SEND_FILE_B64_CHUNK_LEN {
+                    let tail = b64_buf.split_off(SEND_FILE_B64_CHUNK_LEN);
+                    let part = std::mem::replace(&mut b64_buf, tail);
+                    query!(
+                        &db,
+                        "INSERT INTO send_file_chunks (send_file_id, chunk_index, data_base64, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5)",
+                        file_id,
+                        chunk_index,
+                        part,
+                        now,
+                        now
+                    )
+                    .map_err(|_| AppError::Database)?
+                    .run()
+                    .await?;
+                    chunk_index += 1;
+                }
+            }
+
+            if !carry.is_empty() {
+                b64_buf.push_str(&general_purpose::STANDARD.encode(&carry));
+            }
+            if !b64_buf.is_empty() {
+                query!(
+                    &db,
+                    "INSERT INTO send_file_chunks (send_file_id, chunk_index, data_base64, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5)",
+                    file_id,
+                    chunk_index,
+                    b64_buf,
+                    now,
+                    now
+                )
+                .map_err(|_| AppError::Database)?
+                .run()
+                .await?;
+            }
+        }
+
+        break;
+    }
+
+    if !uploaded {
+        return Err(AppError::BadRequest("Missing file data".to_string()));
+    }
 
     query!(
         &db,
@@ -601,8 +742,31 @@ pub async fn download_send(
         return Err(AppError::NotFound("File not found".to_string()));
     };
     let file = serde_json::from_value::<SendFileDBModel>(row).map_err(|_| AppError::Internal)?;
-    let Some(data_b64) = file.data_base64 else {
-        return Err(AppError::NotFound("File not found".to_string()));
+    let data_b64 = match file.data_base64 {
+        Some(v) => v,
+        None => {
+            let rows: Vec<Value> = db
+                .prepare("SELECT data_base64 FROM send_file_chunks WHERE send_file_id = ?1 ORDER BY chunk_index ASC")
+                .bind(&[file_id.clone().into()])?
+                .all()
+                .await
+                .map_err(|_| AppError::Database)?
+                .results()?;
+
+            if rows.is_empty() {
+                return Err(AppError::NotFound("File not found".to_string()));
+            }
+
+            let mut out = String::new();
+            for row in rows {
+                let part = row
+                    .get("data_base64")
+                    .and_then(|v| v.as_str())
+                    .ok_or(AppError::Internal)?;
+                out.push_str(part);
+            }
+            out
+        }
     };
     let bytes = general_purpose::STANDARD.decode(data_b64).map_err(|_| AppError::Internal)?;
 
