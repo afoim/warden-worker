@@ -1,5 +1,5 @@
 use axum::{extract::State, response::IntoResponse, Form, Json};
-use axum::http::StatusCode;
+use axum::http::{header, HeaderMap, StatusCode};
 use axum::response::Response;
 use chrono::{Duration, Utc};
 use constant_time_eq::constant_time_eq;
@@ -183,6 +183,19 @@ fn generate_remember_token() -> String {
     general_purpose::URL_SAFE_NO_PAD.encode(bytes)
 }
 
+fn get_cookie(headers: &HeaderMap, name: &str) -> Option<String> {
+    let raw = headers.get(header::COOKIE)?.to_str().ok()?;
+    for part in raw.split(';') {
+        let part = part.trim();
+        if let Some((k, v)) = part.split_once('=') {
+            if k.trim() == name {
+                return Some(v.trim().to_string());
+            }
+        }
+    }
+    None
+}
+
 fn two_factor_required_response() -> Response {
     (
         StatusCode::BAD_REQUEST,
@@ -214,6 +227,7 @@ fn invalid_two_factor_response() -> Response {
 #[worker::send]
 pub async fn token(
     State(env): State<Arc<Env>>,
+    headers: HeaderMap,
     Form(payload): Form<TokenRequest>,
 ) -> Result<Response, AppError> {
     let db = db::get_db(&env)?;
@@ -245,10 +259,44 @@ pub async fn token(
             let two_factor_enabled = two_factor::is_authenticator_enabled(&db, &user.id).await?;
             let mut remember_token_to_return: Option<String> = None;
             if two_factor_enabled {
+                let wants_remember = payload.two_factor_remember.unwrap_or(0) == 1;
                 let provider = payload.two_factor_provider;
                 let token = payload.two_factor_token.clone();
 
-                if provider == Some(5) {
+                if provider.is_none() && token.is_none() {
+                    let Some(device_identifier) = payload.device_identifier.as_deref() else {
+                        return Ok(two_factor_required_response());
+                    };
+                    let cookie_token = get_cookie(&headers, "twoFactorRemember")
+                        .or_else(|| get_cookie(&headers, "TwoFactorRemember"));
+                    let Some(cookie_token) = cookie_token.as_deref() else {
+                        return Ok(two_factor_required_response());
+                    };
+
+                    ensure_devices_table(&db).await?;
+                    let row: Option<Value> = db
+                        .prepare(
+                            "SELECT remember_token_hash FROM devices WHERE user_id = ?1 AND device_identifier = ?2",
+                        )
+                        .bind(&[user.id.clone().into(), device_identifier.into()])?
+                        .first(None)
+                        .await
+                        .map_err(|_| AppError::Database)?;
+                    let stored_hash = row
+                        .and_then(|v| v.get("remember_token_hash").cloned())
+                        .and_then(|v| v.as_str().map(|s| s.to_string()));
+                    let Some(stored_hash) = stored_hash else {
+                        return Ok(two_factor_required_response());
+                    };
+                    let candidate_hash = sha256_hex(cookie_token);
+                    if !constant_time_eq(stored_hash.as_bytes(), candidate_hash.as_bytes()) {
+                        return Ok(two_factor_required_response());
+                    }
+
+                    if wants_remember && payload.device_identifier.is_some() {
+                        remember_token_to_return = Some(generate_remember_token());
+                    }
+                } else if provider == Some(5) {
                     let Some(device_identifier) = payload.device_identifier.as_deref() else {
                         return Ok(two_factor_required_response());
                     };
@@ -293,12 +341,12 @@ pub async fn token(
                     if !two_factor::verify_totp_code(&secret_encoded, token)? {
                         return Ok(invalid_two_factor_response());
                     }
+
+                    if wants_remember && payload.device_identifier.is_some() {
+                        remember_token_to_return = Some(generate_remember_token());
+                    }
                 } else {
                     return Ok(two_factor_required_response());
-                }
-
-                if payload.device_identifier.is_some() {
-                    remember_token_to_return = Some(generate_remember_token());
                 }
             }
 
@@ -308,6 +356,7 @@ pub async fn token(
             let device_type = payload.device_type;
 
             let mut response = generate_tokens_and_response(user, &env)?;
+            let remember_token_to_set = remember_token_to_return.clone();
 
             if let Some(device_identifier) = device_identifier.as_deref() {
                 ensure_devices_table(&db).await?;
@@ -348,7 +397,19 @@ pub async fn token(
                 }
             }
 
-            Ok(Json(response).into_response())
+            let mut resp = Json(response).into_response();
+            if let Some(token) = remember_token_to_set {
+                let cookie = format!(
+                    "twoFactorRemember={}; Max-Age={}; Path=/; HttpOnly; Secure; SameSite=Lax",
+                    token,
+                    Duration::days(30).num_seconds()
+                );
+                resp.headers_mut().append(
+                    header::SET_COOKIE,
+                    cookie.parse().map_err(|_| AppError::Internal)?,
+                );
+            }
+            Ok(resp)
         }
         "refresh_token" => {
             let refresh_token = payload

@@ -39,6 +39,8 @@ pub struct SyncResponse {
     pub folders: Vec<FolderResponse>,
     #[serde(rename = "ciphers")]
     pub ciphers: Vec<Cipher>,
+    #[serde(rename = "Sends")]
+    pub sends: Vec<Value>,
     #[serde(rename = "Domains")]
     pub domains: Value,
     #[serde(rename = "Object")]
