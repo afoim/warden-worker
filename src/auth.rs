@@ -2,12 +2,12 @@ use axum::{
     extract::FromRequestParts,
     http::{header, request::Parts},
 };
-use jsonwebtoken::{decode, DecodingKey, Validation};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use worker::Env;
 
 use crate::error::AppError;
+use crate::jwt;
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Claims {
@@ -43,11 +43,6 @@ impl FromRequestParts<Arc<Env>> for Claims
 
         let secret = state.secret("JWT_SECRET")?;
 
-        // Decode and validate the token
-        let decoding_key = DecodingKey::from_secret(secret.to_string().as_ref());
-        let token_data = decode::<Claims>(&token, &decoding_key, &Validation::default())
-            .map_err(|_| AppError::Unauthorized("Invalid token".to_string()))?;
-
-        Ok(token_data.claims)
+        jwt::decode_hs256(&token, &secret.to_string())
     }
 }

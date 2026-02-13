@@ -1,20 +1,21 @@
-use axum::{extract::State, response::IntoResponse, Form, Json};
-use axum::http::StatusCode;
+use axum::http::{HeaderMap, StatusCode};
 use axum::response::Response;
+use axum::{extract::State, response::IntoResponse, Form, Json};
+use base64::{engine::general_purpose, Engine as _};
 use chrono::{Duration, Utc};
 use constant_time_eq::constant_time_eq;
-use base64::{engine::general_purpose, Engine as _};
 use rand::RngCore;
-use jsonwebtoken::{decode, encode, DecodingKey, EncodingKey, Header, Validation};
-use serde::Deserialize;
 use serde::de::{self, Deserializer};
+use serde::Deserialize;
 use serde_json::{json, Value};
+use sha2::{Digest, Sha256};
 use std::sync::Arc;
 use uuid::Uuid;
 use worker::Env;
-use sha2::{Digest, Sha256};
 
-use crate::{auth::Claims, db, error::AppError, models::user::User, two_factor};
+use crate::{
+    auth::Claims, db, error::AppError, jwt, models::user::User, two_factor, webauthn,
+};
 
 fn deserialize_trimmed_i32_opt<'de, D>(deserializer: D) -> Result<Option<i32>, D::Error>
 where
@@ -39,6 +40,9 @@ pub struct TokenRequest {
     username: Option<String>,
     password: Option<String>, // This is the masterPasswordHash
     refresh_token: Option<String>,
+    token: Option<String>,
+    #[serde(rename = "deviceResponse")]
+    device_response: Option<String>,
     scope: Option<String>,
     client_id: Option<String>,
     #[serde(rename = "deviceIdentifier")]
@@ -58,10 +62,7 @@ pub struct TokenRequest {
     two_factor_remember: Option<i32>,
 }
 
-fn generate_tokens_and_response(
-    user: User,
-    env: &Arc<Env>,
-) -> Result<Value, AppError> {
+fn generate_tokens_and_response(user: User, env: &Arc<Env>) -> Result<Value, AppError> {
     let now = Utc::now();
     let expires_in = Duration::hours(2);
     let exp = (now + expires_in).timestamp() as usize;
@@ -78,11 +79,7 @@ fn generate_tokens_and_response(
     };
 
     let jwt_secret = env.secret("JWT_SECRET")?.to_string();
-    let access_token = encode(
-        &Header::default(),
-        &access_claims,
-        &EncodingKey::from_secret(jwt_secret.as_ref()),
-    )?;
+    let access_token = jwt::encode_hs256(&access_claims, &jwt_secret)?;
 
     let refresh_expires_in = Duration::days(30);
     let refresh_exp = (now + refresh_expires_in).timestamp() as usize;
@@ -97,11 +94,7 @@ fn generate_tokens_and_response(
         amr: vec!["Application".into()],
     };
     let jwt_refresh_secret = env.secret("JWT_REFRESH_SECRET")?.to_string();
-    let refresh_token = encode(
-        &Header::default(),
-        &refresh_claims,
-        &EncodingKey::from_secret(jwt_refresh_secret.as_ref()),
-    )?;
+    let refresh_token = jwt::encode_hs256(&refresh_claims, &jwt_refresh_secret)?;
 
     Ok(json!({
         "ForcePasswordReset": false,
@@ -183,36 +176,94 @@ fn generate_remember_token() -> String {
     general_purpose::URL_SAFE_NO_PAD.encode(bytes)
 }
 
-fn two_factor_required_response() -> Response {
-    (
+async fn two_factor_metadata(
+    db: &worker::D1Database,
+    user_id: &str,
+    headers: &HeaderMap,
+) -> Result<(Vec<String>, serde_json::Map<String, Value>), AppError> {
+    let mut providers: Vec<String> = Vec::new();
+    let mut providers2 = serde_json::Map::new();
+
+    if two_factor::is_authenticator_enabled(db, user_id).await? {
+        providers.push(two_factor::TWO_FACTOR_PROVIDER_AUTHENTICATOR.to_string());
+        providers2.insert(
+            two_factor::TWO_FACTOR_PROVIDER_AUTHENTICATOR.to_string(),
+            Value::Null,
+        );
+    }
+
+    if webauthn::is_webauthn_enabled(db, user_id).await? {
+        let rp_id = webauthn::rp_id_from_headers(headers);
+        let origin = webauthn::origin_from_headers(headers);
+        if let Some(challenge) =
+            webauthn::issue_login_challenge(db, user_id, &rp_id, &origin).await?
+        {
+            providers.push(webauthn::TWO_FACTOR_PROVIDER_WEBAUTHN.to_string());
+            providers2.insert(
+                webauthn::TWO_FACTOR_PROVIDER_WEBAUTHN.to_string(),
+                challenge,
+            );
+        }
+    }
+
+    Ok((providers, providers2))
+}
+
+async fn two_factor_required_response(
+    db: &worker::D1Database,
+    user_id: &str,
+    headers: &HeaderMap,
+) -> Result<Response, AppError> {
+    let (providers, providers2) = two_factor_metadata(db, user_id, headers).await?;
+    Ok((
         StatusCode::BAD_REQUEST,
         Json(json!({
-            "TwoFactorProviders": [two_factor::TWO_FACTOR_PROVIDER_AUTHENTICATOR.to_string()],
-            "TwoFactorProviders2": { "0": null },
+            "TwoFactorProviders": providers,
+            "TwoFactorProviders2": providers2,
             "MasterPasswordPolicy": { "Object": "masterPasswordPolicy" },
             "error": "invalid_grant",
             "error_description": "Two factor required."
         })),
     )
-        .into_response()
+        .into_response())
 }
 
-fn invalid_two_factor_response() -> Response {
-    (
+async fn invalid_two_factor_response(
+    db: &worker::D1Database,
+    user_id: &str,
+    headers: &HeaderMap,
+) -> Result<Response, AppError> {
+    let (providers, providers2) = two_factor_metadata(db, user_id, headers).await?;
+    Ok((
         StatusCode::BAD_REQUEST,
         Json(json!({
-            "TwoFactorProviders": [two_factor::TWO_FACTOR_PROVIDER_AUTHENTICATOR.to_string()],
-            "TwoFactorProviders2": { "0": null },
+            "TwoFactorProviders": providers,
+            "TwoFactorProviders2": providers2,
             "MasterPasswordPolicy": { "Object": "masterPasswordPolicy" },
             "error": "invalid_grant",
             "error_description": "Invalid two factor token."
         })),
     )
-        .into_response()
+        .into_response())
+}
+
+#[worker::send]
+pub async fn webauthn_assertion_options(
+    headers: HeaderMap,
+    State(env): State<Arc<Env>>,
+) -> Result<Json<Value>, AppError> {
+    let db = db::get_db(&env)?;
+    let rp_id = webauthn::rp_id_from_headers(&headers);
+    let origin = webauthn::origin_from_headers(&headers);
+    let jwt_secret = env.secret("JWT_SECRET")?.to_string();
+    let payload =
+        webauthn::issue_passwordless_assertion_options(&db, &rp_id, &origin, &jwt_secret).await?;
+    Ok(Json(payload))
 }
 
 #[worker::send]
 pub async fn token(
+    headers: HeaderMap,
     State(env): State<Arc<Env>>,
     Form(payload): Form<TokenRequest>,
 ) -> Result<Response, AppError> {
@@ -242,7 +293,9 @@ pub async fn token(
                 return Err(AppError::Unauthorized("Invalid credentials".to_string()));
             }
 
-            let two_factor_enabled = two_factor::is_authenticator_enabled(&db, &user.id).await?;
+            let authenticator_enabled = two_factor::is_authenticator_enabled(&db, &user.id).await?;
+            let webauthn_enabled = webauthn::is_webauthn_enabled(&db, &user.id).await?;
+            let two_factor_enabled = authenticator_enabled || webauthn_enabled;
             let mut remember_token_to_return: Option<String> = None;
             if two_factor_enabled {
                 let provider = payload.two_factor_provider;
@@ -250,10 +303,10 @@ pub async fn token(
 
                 if provider == Some(5) {
                     let Some(device_identifier) = payload.device_identifier.as_deref() else {
-                        return Ok(two_factor_required_response());
+                        return two_factor_required_response(&db, &user.id, &headers).await;
                     };
                     let Some(token) = token.as_deref() else {
-                        return Ok(two_factor_required_response());
+                        return two_factor_required_response(&db, &user.id, &headers).await;
                     };
 
                     ensure_devices_table(&db).await?;
@@ -269,15 +322,18 @@ pub async fn token(
                         .and_then(|v| v.get("remember_token_hash").cloned())
                         .and_then(|v| v.as_str().map(|s| s.to_string()));
                     let Some(stored_hash) = stored_hash else {
-                        return Ok(two_factor_required_response());
+                        return two_factor_required_response(&db, &user.id, &headers).await;
                     };
                     let candidate_hash = sha256_hex(token);
                     if !constant_time_eq(stored_hash.as_bytes(), candidate_hash.as_bytes()) {
-                        return Ok(two_factor_required_response());
+                        return two_factor_required_response(&db, &user.id, &headers).await;
                     }
                 } else if provider == Some(two_factor::TWO_FACTOR_PROVIDER_AUTHENTICATOR) {
+                    if !authenticator_enabled {
+                        return two_factor_required_response(&db, &user.id, &headers).await;
+                    }
                     let Some(token) = token.as_deref() else {
-                        return Ok(two_factor_required_response());
+                        return two_factor_required_response(&db, &user.id, &headers).await;
                     };
 
                     let secret_enc = two_factor::get_authenticator_secret_enc(&db, &user.id)
@@ -291,10 +347,24 @@ pub async fn token(
                         &secret_enc,
                     )?;
                     if !two_factor::verify_totp_code(&secret_encoded, token)? {
-                        return Ok(invalid_two_factor_response());
+                        return invalid_two_factor_response(&db, &user.id, &headers).await;
+                    }
+                } else if provider == Some(webauthn::TWO_FACTOR_PROVIDER_WEBAUTHN) {
+                    if !webauthn_enabled {
+                        return two_factor_required_response(&db, &user.id, &headers).await;
+                    }
+                    let Some(token) = token.as_deref() else {
+                        return two_factor_required_response(&db, &user.id, &headers).await;
+                    };
+
+                    if webauthn::verify_login_assertion(&db, &user.id, token)
+                        .await
+                        .is_err()
+                    {
+                        return invalid_two_factor_response(&db, &user.id, &headers).await;
                     }
                 } else {
-                    return Ok(two_factor_required_response());
+                    return two_factor_required_response(&db, &user.id, &headers).await;
                 }
 
                 if payload.device_identifier.is_some() {
@@ -313,9 +383,7 @@ pub async fn token(
                 ensure_devices_table(&db).await?;
 
                 let now = Utc::now().to_rfc3339();
-                let remember_hash = remember_token_to_return
-                    .as_deref()
-                    .map(sha256_hex);
+                let remember_hash = remember_token_to_return.as_deref().map(sha256_hex);
 
                 if let Ok(stmt) = db
                     .prepare(
@@ -332,7 +400,7 @@ pub async fn token(
                         user_id.clone().into(),
                         device_identifier.into(),
                         device_name.clone().into(),
-                        device_type.map(|v| v as i64).into(),
+                        device_type.map(f64::from).into(),
                         remember_hash.clone().into(),
                         now.clone().into(),
                         now.into(),
@@ -350,20 +418,79 @@ pub async fn token(
 
             Ok(Json(response).into_response())
         }
+        "webauthn" => {
+            let challenge_token = payload
+                .token
+                .ok_or_else(|| AppError::BadRequest("Missing token".to_string()))?;
+            let device_response = payload
+                .device_response
+                .ok_or_else(|| AppError::BadRequest("Missing deviceResponse".to_string()))?;
+            let jwt_secret = env.secret("JWT_SECRET")?.to_string();
+            let user_id = webauthn::verify_passwordless_login_assertion(
+                &db,
+                &challenge_token,
+                &device_response,
+                &jwt_secret,
+            )
+            .await
+            .map_err(|_| AppError::Unauthorized("Invalid credentials".to_string()))?;
+
+            let user: Value = db
+                .prepare("SELECT * FROM users WHERE id = ?1")
+                .bind(&[user_id.clone().into()])?
+                .first(None)
+                .await
+                .map_err(|_| AppError::Unauthorized("Invalid credentials".to_string()))?
+                .ok_or_else(|| AppError::Unauthorized("Invalid credentials".to_string()))?;
+            let user: User = serde_json::from_value(user).map_err(|_| AppError::Internal)?;
+
+            let device_identifier = payload.device_identifier.clone();
+            let device_name = payload.device_name.clone();
+            let device_type = payload.device_type;
+
+            let response = generate_tokens_and_response(user, &env)?;
+
+            if let Some(device_identifier) = device_identifier.as_deref() {
+                ensure_devices_table(&db).await?;
+
+                let now = Utc::now().to_rfc3339();
+                if let Ok(stmt) = db
+                    .prepare(
+                        "INSERT INTO devices (id, user_id, device_identifier, device_name, device_type, remember_token_hash, created_at, updated_at)
+                         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+                         ON CONFLICT(user_id, device_identifier) DO UPDATE SET
+                           updated_at = excluded.updated_at,
+                           device_name = excluded.device_name,
+                           device_type = excluded.device_type,
+                           remember_token_hash = COALESCE(excluded.remember_token_hash, devices.remember_token_hash)",
+                    )
+                    .bind(&[
+                        Uuid::new_v4().to_string().into(),
+                        user_id.clone().into(),
+                        device_identifier.into(),
+                        device_name.clone().into(),
+                        device_type.map(f64::from).into(),
+                        Option::<String>::None.into(),
+                        now.clone().into(),
+                        now.into(),
+                    ])
+                {
+                    let _ = stmt.run().await;
+                }
+            }
+
+            Ok(Json(response).into_response())
+        }
         "refresh_token" => {
             let refresh_token = payload
                 .refresh_token
                 .ok_or_else(|| AppError::BadRequest("Missing refresh_token".to_string()))?;
 
             let jwt_refresh_secret = env.secret("JWT_REFRESH_SECRET")?.to_string();
-            let token_data = decode::<Claims>(
-                &refresh_token,
-                &DecodingKey::from_secret(jwt_refresh_secret.as_ref()),
-                &Validation::default(),
-            )
-            .map_err(|_| AppError::Unauthorized("Invalid refresh token".to_string()))?;
+            let token_data: Claims = jwt::decode_hs256(&refresh_token, &jwt_refresh_secret)
+                .map_err(|_| AppError::Unauthorized("Invalid refresh token".to_string()))?;
 
-            let user_id = token_data.claims.sub;
+            let user_id = token_data.sub;
             let user: Value = db
                 .prepare("SELECT * FROM users WHERE id = ?1")
                 .bind(&[user_id.into()])?

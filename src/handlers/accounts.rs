@@ -13,7 +13,7 @@ use crate::{
     db,
     error::AppError,
     models::user::{KeyData, PreloginResponse, RegisterRequest, User},
-    two_factor,
+    two_factor, webauthn,
 };
 
 #[derive(Debug, Deserialize)]
@@ -44,13 +44,21 @@ pub struct ChangeEmailRequest {
     pub kdf_iterations: Option<i32>,
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct VerifyPasswordRequest {
+    #[serde(alias = "MasterPasswordHash")]
+    pub master_password_hash: String,
+}
+
 #[worker::send]
 pub async fn profile(
     claims: Claims,
     State(env): State<Arc<Env>>,
 ) -> Result<Json<Value>, AppError> {
     let db = db::get_db(&env)?;
-    let two_factor_enabled = two_factor::is_authenticator_enabled(&db, &claims.sub).await?;
+    let two_factor_enabled = two_factor::is_authenticator_enabled(&db, &claims.sub).await?
+        || webauthn::is_webauthn_enabled(&db, &claims.sub).await?;
     let user: User = query!(
         &db,
         "SELECT * FROM users WHERE id = ?1",
@@ -96,16 +104,28 @@ pub async fn prelogin(
         .ok_or_else(|| AppError::BadRequest("Missing email".to_string()))?;
     let db = db::get_db(&env)?;
 
-    let stmt = db.prepare("SELECT kdf_iterations FROM users WHERE email = ?1");
-    let query = stmt.bind(&[email.into()])?;
-    let kdf_iterations: Option<i32> = query
-        .first(Some("kdf_iterations"))
+    let stmt = db.prepare("SELECT kdf_type, kdf_iterations FROM users WHERE email = ?1");
+    let query = stmt.bind(&[email.to_lowercase().into()])?;
+    let kdf_row: Option<Value> = query
+        .first(None)
         .await
         .map_err(|_| AppError::Database)?;
+    let kdf = kdf_row
+        .as_ref()
+        .and_then(|row| row.get("kdf_type"))
+        .and_then(|v| v.as_i64())
+        .map(|v| v as i32)
+        .unwrap_or(0);
+    let kdf_iterations = kdf_row
+        .as_ref()
+        .and_then(|row| row.get("kdf_iterations"))
+        .and_then(|v| v.as_i64())
+        .map(|v| v as i32)
+        .unwrap_or(600_000);
 
     Ok(Json(PreloginResponse {
-        kdf: 0, // PBKDF2
-        kdf_iterations: kdf_iterations.unwrap_or(600_000),
+        kdf,
+        kdf_iterations,
         kdf_memory: None,
         kdf_parallelism: None,
     }))
@@ -117,6 +137,7 @@ pub async fn register(
     Json(payload): Json<RegisterRequest>,
 ) -> Result<Json<Value>, AppError> {
     let db = db::get_db(&env)?;
+    let normalized_email = payload.email.trim().to_lowercase();
     let user_count: Option<i64> = db
         .prepare("SELECT COUNT(1) AS user_count FROM users")
         .first(Some("user_count"))
@@ -126,14 +147,14 @@ pub async fn register(
     if user_count == 0 {
         let allowed_emails = env
             .secret("ALLOWED_EMAILS")
-            .map_err(|_| AppError::Internal)?;
-        let allowed_emails = allowed_emails
-            .as_ref()
-            .as_string()
-            .ok_or_else(|| AppError::Internal)?;
-        if allowed_emails
-            .split(",")
-            .all(|email| email.trim() != payload.email)
+            .ok()
+            .and_then(|secret| secret.as_ref().as_string())
+            .unwrap_or_default();
+        if !allowed_emails.trim().is_empty()
+            && allowed_emails
+                .split(",")
+                .map(|email| email.trim().to_lowercase())
+                .all(|email| email != normalized_email)
         {
             return Err(AppError::Unauthorized("Not allowed to signup".to_string()));
         }
@@ -142,7 +163,7 @@ pub async fn register(
     let user = User {
         id: Uuid::new_v4().to_string(),
         name: payload.name,
-        email: payload.email.to_lowercase(),
+        email: normalized_email,
         email_verified: false,
         master_password_hash: payload.master_password_hash,
         master_password_hint: payload.master_password_hint,
@@ -156,10 +177,10 @@ pub async fn register(
         updated_at: now,
     };
 
-    let query = query!(
+    query!(
         &db,
-        "INSERT INTO users (id, name, email, master_password_hash, key, private_key, public_key, kdf_iterations, security_stamp, created_at, updated_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+        "INSERT INTO users (id, name, email, master_password_hash, key, private_key, public_key, kdf_type, kdf_iterations, security_stamp, created_at, updated_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
          user.id,
          user.name,
          user.email,
@@ -167,16 +188,17 @@ pub async fn register(
          user.key,
          user.private_key,
          user.public_key,
+         user.kdf_type,
          user.kdf_iterations,
          user.security_stamp,
          user.created_at,
          user.updated_at
-    ).map_err(|error|{
+    ).map_err(|_|{
         AppError::Database
     })?
     .run()
     .await
-    .map_err(|error|{
+    .map_err(|_|{
         AppError::Database
     })?;
 
@@ -325,4 +347,35 @@ fn to_js_val<T: Into<JsValue>>(val: Option<T>) -> JsValue {
 #[worker::send]
 pub async fn send_verification_email() -> String {
     "fixed-token-to-mock".to_string()
+}
+
+#[worker::send]
+pub async fn verify_password(
+    claims: Claims,
+    State(env): State<Arc<Env>>,
+    Json(payload): Json<VerifyPasswordRequest>,
+) -> Result<Json<Value>, AppError> {
+    if payload.master_password_hash.is_empty() {
+        return Err(AppError::BadRequest("Missing masterPasswordHash".to_string()));
+    }
+
+    let db = db::get_db(&env)?;
+    let stored_hash: Option<String> = db
+        .prepare("SELECT master_password_hash FROM users WHERE id = ?1")
+        .bind(&[claims.sub.into()])?
+        .first(Some("master_password_hash"))
+        .await
+        .map_err(|_| AppError::Database)?;
+    let Some(stored_hash) = stored_hash else {
+        return Err(AppError::NotFound("User not found".to_string()));
+    };
+
+    if !constant_time_eq(
+        stored_hash.as_bytes(),
+        payload.master_password_hash.as_bytes(),
+    ) {
+        return Err(AppError::Unauthorized("Invalid credentials".to_string()));
+    }
+
+    Ok(Json(Value::Null))
 }

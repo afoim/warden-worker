@@ -19,6 +19,7 @@ use crate::{
     auth::Claims,
     db,
     error::AppError,
+    jwt,
     models::send::{
         send_to_json, send_to_json_access, uuid_from_access_id, SendAccessData, SendDBModel,
         SendData, SendFileDBModel, SEND_TYPE_FILE, SEND_TYPE_TEXT,
@@ -700,24 +701,15 @@ fn generate_download_token(env: &Arc<Env>, send_id: &str, file_id: &str) -> Resu
         sub: format!("{send_id}/{file_id}"),
         exp,
     };
-    let token = jsonwebtoken::encode(
-        &jsonwebtoken::Header::default(),
-        &claims,
-        &jsonwebtoken::EncodingKey::from_secret(secret.as_bytes()),
-    )?;
-    Ok(token)
+    jwt::encode_hs256(&claims, &secret)
 }
 
 fn validate_download_token(env: &Arc<Env>, token: &str, send_id: &str, file_id: &str) -> Result<(), AppError> {
     let secret = env.secret("JWT_SECRET")?.to_string();
-    let data = jsonwebtoken::decode::<SendDownloadClaims>(
-        token,
-        &jsonwebtoken::DecodingKey::from_secret(secret.as_bytes()),
-        &jsonwebtoken::Validation::default(),
-    )
-    .map_err(|_| AppError::Unauthorized("Invalid token".to_string()))?;
+    let data: SendDownloadClaims = jwt::decode_hs256(token, &secret)
+        .map_err(|_| AppError::Unauthorized("Invalid token".to_string()))?;
 
-    if data.claims.sub != format!("{send_id}/{file_id}") {
+    if data.sub != format!("{send_id}/{file_id}") {
         return Err(AppError::Unauthorized("Invalid token".to_string()));
     }
     Ok(())

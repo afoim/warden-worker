@@ -7,9 +7,11 @@ mod crypto;
 mod db;
 mod error;
 mod handlers;
+mod jwt;
 mod models;
 mod router;
 mod two_factor;
+mod webauthn;
 
 #[event(fetch)]
 pub async fn main(

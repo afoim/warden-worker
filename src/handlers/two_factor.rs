@@ -11,6 +11,7 @@ use crate::auth::Claims;
 use crate::db;
 use crate::error::AppError;
 use crate::two_factor;
+use crate::webauthn;
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -92,18 +93,32 @@ pub struct DisableAuthenticatorData {
     r#type: NumberOrString,
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DisableTwoFactorProviderData {
+    #[serde(alias = "MasterPasswordHash")]
+    master_password_hash: Option<String>,
+    otp: Option<String>,
+    #[serde(rename = "type")]
+    r#type: NumberOrString,
+}
+
 #[worker::send]
 pub async fn two_factor_status(
     claims: Claims,
     State(env): State<Arc<Env>>,
 ) -> Result<Json<serde_json::Value>, AppError> {
     let db = db::get_db(&env)?;
-    let enabled = two_factor::is_authenticator_enabled(&db, &claims.sub).await?;
-    let providers: Vec<i32> = if enabled {
-        vec![two_factor::TWO_FACTOR_PROVIDER_AUTHENTICATOR]
-    } else {
-        Vec::new()
-    };
+    let authenticator_enabled = two_factor::is_authenticator_enabled(&db, &claims.sub).await?;
+    let webauthn_enabled = webauthn::is_webauthn_enabled(&db, &claims.sub).await?;
+    let enabled = authenticator_enabled || webauthn_enabled;
+    let mut providers: Vec<i32> = Vec::new();
+    if authenticator_enabled {
+        providers.push(two_factor::TWO_FACTOR_PROVIDER_AUTHENTICATOR);
+    }
+    if webauthn_enabled {
+        providers.push(webauthn::TWO_FACTOR_PROVIDER_WEBAUTHN);
+    }
     Ok(Json(json!({
         "enabled": enabled,
         "providers": providers
@@ -180,7 +195,11 @@ pub async fn get_authenticator(
             .await?
             .ok_or_else(|| AppError::Internal)?;
         let two_factor_key_b64 = env.secret("TWO_FACTOR_ENC_KEY").ok().map(|s| s.to_string());
-        two_factor::decrypt_secret_with_optional_key(two_factor_key_b64.as_deref(), &claims.sub, &secret_enc)?
+        two_factor::decrypt_secret_with_optional_key(
+            two_factor_key_b64.as_deref(),
+            &claims.sub,
+            &secret_enc,
+        )?
     } else {
         two_factor::generate_totp_secret_base32_20()
     };
@@ -222,7 +241,11 @@ pub async fn activate_authenticator(
 
     let now = Utc::now().to_rfc3339();
     let two_factor_key_b64 = env.secret("TWO_FACTOR_ENC_KEY").ok().map(|s| s.to_string());
-    let secret_enc = two_factor::encrypt_secret_with_optional_key(two_factor_key_b64.as_deref(), &claims.sub, &key)?;
+    let secret_enc = two_factor::encrypt_secret_with_optional_key(
+        two_factor_key_b64.as_deref(),
+        &claims.sub,
+        &key,
+    )?;
     two_factor::upsert_authenticator_secret(&db, &claims.sub, secret_enc, true, &now).await?;
 
     Ok(Json(json!({
@@ -258,14 +281,20 @@ pub async fn disable_authenticator_vw(
     let Some(stored_hash) = stored_hash else {
         return Err(AppError::NotFound("User not found".to_string()));
     };
-    if !constant_time_eq(stored_hash.as_bytes(), payload.master_password_hash.as_bytes()) {
+    if !constant_time_eq(
+        stored_hash.as_bytes(),
+        payload.master_password_hash.as_bytes(),
+    ) {
         return Err(AppError::Unauthorized("Invalid credentials".to_string()));
     }
 
     if let Some(secret_enc) = two_factor::get_authenticator_secret_enc(&db, &claims.sub).await? {
         let two_factor_key_b64 = env.secret("TWO_FACTOR_ENC_KEY").ok().map(|s| s.to_string());
-        let secret_encoded =
-            two_factor::decrypt_secret_with_optional_key(two_factor_key_b64.as_deref(), &claims.sub, &secret_enc)?;
+        let secret_encoded = two_factor::decrypt_secret_with_optional_key(
+            two_factor_key_b64.as_deref(),
+            &claims.sub,
+            &secret_enc,
+        )?;
         if secret_encoded.eq_ignore_ascii_case(payload.key.trim()) {
             two_factor::disable_authenticator(&db, &claims.sub).await?;
         } else {
@@ -277,7 +306,9 @@ pub async fn disable_authenticator_vw(
 
     let type_ = match payload.r#type {
         NumberOrString::Number(n) => n as i32,
-        NumberOrString::String(s) => s.parse::<i32>().unwrap_or(two_factor::TWO_FACTOR_PROVIDER_AUTHENTICATOR),
+        NumberOrString::String(s) => s
+            .parse::<i32>()
+            .unwrap_or(two_factor::TWO_FACTOR_PROVIDER_AUTHENTICATOR),
     };
 
     Ok(Json(json!({
@@ -341,4 +372,46 @@ pub async fn authenticator_disable(
 
     two_factor::disable_authenticator(&db, &claims.sub).await?;
     Ok(Json(json!({})))
+}
+
+#[worker::send]
+pub async fn disable_two_factor(
+    claims: Claims,
+    State(env): State<Arc<Env>>,
+    Json(payload): Json<DisableTwoFactorProviderData>,
+) -> Result<Json<serde_json::Value>, AppError> {
+    let db = db::get_db(&env)?;
+    PasswordOrOtpData {
+        master_password_hash: payload.master_password_hash,
+        otp: payload.otp,
+    }
+    .validate(&db, &claims.sub)
+    .await?;
+
+    let provider = match payload.r#type {
+        NumberOrString::Number(n) => n as i32,
+        NumberOrString::String(s) => s
+            .parse::<i32>()
+            .map_err(|_| AppError::BadRequest("Invalid two factor type".to_string()))?,
+    };
+
+    match provider {
+        two_factor::TWO_FACTOR_PROVIDER_AUTHENTICATOR => {
+            two_factor::disable_authenticator(&db, &claims.sub).await?
+        }
+        webauthn::TWO_FACTOR_PROVIDER_WEBAUTHN => {
+            webauthn::disable_webauthn(&db, &claims.sub).await?
+        }
+        _ => {
+            return Err(AppError::BadRequest(
+                "Unsupported two factor type".to_string(),
+            ))
+        }
+    }
+
+    Ok(Json(json!({
+        "enabled": false,
+        "keys": provider,
+        "object": "twoFactorProvider"
+    })))
 }

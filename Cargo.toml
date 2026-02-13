@@ -38,15 +38,18 @@ serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 
 # Crypto & Encoding
-jsonwebtoken = "9.2"
 base64 = "0.21"
 hex = "0.4"
 rand = { version = "0.8" }
 getrandom = { version = "0.3", features = ["wasm_js"] }
+getrandom_02 = { package = "getrandom", version = "0.2", features = ["js"] }
 constant_time_eq = "0.3"
 aes-gcm = "0.10"
 totp-rs = { version = "5.7.0", default-features = false, features = ["otpauth", "gen_secret", "qr"] }
 sha2 = "0.10"
+hmac = "0.12"
+p256 = { version = "0.13", features = ["ecdsa"] }
+ciborium = "0.2"
 
 # Utilities
 chrono = { version = "0.4", features = ["serde"] }
