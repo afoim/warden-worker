@@ -3,3 +3,5 @@ node_modules
 .wrangler
 vaultwarden-main
 keyguard-app-master
+
+.idea
