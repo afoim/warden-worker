@@ -296,6 +296,7 @@ pub async fn token(
             let authenticator_enabled = two_factor::is_authenticator_enabled(&db, &user.id).await?;
             let webauthn_enabled = webauthn::is_webauthn_enabled(&db, &user.id).await?;
             let two_factor_enabled = authenticator_enabled || webauthn_enabled;
+            let remember_device_requested = payload.two_factor_remember == Some(1);
             let mut remember_token_to_return: Option<String> = None;
             if two_factor_enabled {
                 let provider = payload.two_factor_provider;
@@ -367,7 +368,7 @@ pub async fn token(
                     return two_factor_required_response(&db, &user.id, &headers).await;
                 }
 
-                if payload.device_identifier.is_some() {
+                if remember_device_requested && payload.device_identifier.is_some() {
                     remember_token_to_return = Some(generate_remember_token());
                 }
             }
