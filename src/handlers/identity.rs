@@ -62,7 +62,17 @@ pub struct TokenRequest {
     two_factor_remember: Option<i32>,
 }
 
-fn generate_tokens_and_response(user: User, env: &Arc<Env>) -> Result<Value, AppError> {
+#[derive(Debug, Clone)]
+struct WebAuthnPrfOptionPayload {
+    encrypted_private_key: String,
+    encrypted_user_key: String,
+}
+
+fn generate_tokens_and_response(
+    user: User,
+    env: &Arc<Env>,
+    webauthn_prf_option: Option<&WebAuthnPrfOptionPayload>,
+) -> Result<Value, AppError> {
     let now = Utc::now();
     let expires_in = Duration::hours(2);
     let exp = (now + expires_in).timestamp() as usize;
@@ -96,6 +106,34 @@ fn generate_tokens_and_response(user: User, env: &Arc<Env>) -> Result<Value, App
     let jwt_refresh_secret = env.secret("JWT_REFRESH_SECRET")?.to_string();
     let refresh_token = jwt::encode_hs256(&refresh_claims, &jwt_refresh_secret)?;
 
+    let mut user_decryption_options = json!({
+        "HasMasterPassword": true,
+        "MasterPasswordUnlock": {
+            "Kdf": {
+                "KdfType": user.kdf_type,
+                "Iterations": user.kdf_iterations,
+                "Memory": null,
+                "Parallelism": null
+            },
+            "MasterKeyEncryptedUserKey": user.key,
+            "MasterKeyWrappedUserKey": user.key,
+            "Salt": user.email
+        },
+        "Object": "userDecryptionOptions"
+    });
+
+    if let Some(option) = webauthn_prf_option {
+        if let Some(obj) = user_decryption_options.as_object_mut() {
+            obj.insert(
+                "WebAuthnPrfOption".to_string(),
+                json!({
+                    "EncryptedPrivateKey": option.encrypted_private_key,
+                    "EncryptedUserKey": option.encrypted_user_key
+                }),
+            );
+        }
+    }
+
     Ok(json!({
         "ForcePasswordReset": false,
         "Kdf": user.kdf_type,
@@ -106,21 +144,7 @@ fn generate_tokens_and_response(user: User, env: &Arc<Env>) -> Result<Value, App
         "MasterPasswordPolicy": { "Object": "masterPasswordPolicy" },
         "PrivateKey": user.private_key,
         "ResetMasterPassword": false,
-        "UserDecryptionOptions": {
-            "HasMasterPassword": true,
-            "MasterPasswordUnlock": {
-                "Kdf": {
-                    "KdfType": user.kdf_type,
-                    "Iterations": user.kdf_iterations,
-                    "Memory": null,
-                    "Parallelism": null
-                },
-                "MasterKeyEncryptedUserKey": user.key,
-                "MasterKeyWrappedUserKey": user.key,
-                "Salt": user.email
-            },
-            "Object": "userDecryptionOptions"
-        },
+        "UserDecryptionOptions": user_decryption_options,
         "AccountKeys": {
             "publicKeyEncryptionKeyPair": {
                 "wrappedPrivateKey": user.private_key,
@@ -378,7 +402,7 @@ pub async fn token(
             let device_name = payload.device_name.clone();
             let device_type = payload.device_type;
 
-            let mut response = generate_tokens_and_response(user, &env)?;
+            let mut response = generate_tokens_and_response(user, &env, None)?;
 
             if let Some(device_identifier) = device_identifier.as_deref() {
                 ensure_devices_table(&db).await?;
@@ -427,7 +451,7 @@ pub async fn token(
                 .device_response
                 .ok_or_else(|| AppError::BadRequest("Missing deviceResponse".to_string()))?;
             let jwt_secret = env.secret("JWT_SECRET")?.to_string();
-            let user_id = webauthn::verify_passwordless_login_assertion(
+            let login_result = webauthn::verify_passwordless_login_assertion(
                 &db,
                 &challenge_token,
                 &device_response,
@@ -435,6 +459,7 @@ pub async fn token(
             )
             .await
             .map_err(|_| AppError::Unauthorized("Invalid credentials".to_string()))?;
+            let user_id = login_result.user_id.clone();
 
             let user: Value = db
                 .prepare("SELECT * FROM users WHERE id = ?1")
@@ -449,7 +474,24 @@ pub async fn token(
             let device_name = payload.device_name.clone();
             let device_type = payload.device_type;
 
-            let response = generate_tokens_and_response(user, &env)?;
+            let webauthn_prf_option = match (
+                login_result.encrypted_private_key.as_deref(),
+                login_result.encrypted_user_key.as_deref(),
+            ) {
+                (Some(encrypted_private_key), Some(encrypted_user_key))
+                    if !encrypted_private_key.trim().is_empty()
+                        && !encrypted_user_key.trim().is_empty() =>
+                {
+                    Some(WebAuthnPrfOptionPayload {
+                        encrypted_private_key: encrypted_private_key.to_string(),
+                        encrypted_user_key: encrypted_user_key.to_string(),
+                    })
+                }
+                _ => None,
+            };
+
+            let response =
+                generate_tokens_and_response(user, &env, webauthn_prf_option.as_ref())?;
 
             if let Some(device_identifier) = device_identifier.as_deref() {
                 ensure_devices_table(&db).await?;
@@ -501,7 +543,7 @@ pub async fn token(
                 .ok_or_else(|| AppError::Unauthorized("Invalid user".to_string()))?;
             let user: User = serde_json::from_value(user).map_err(|_| AppError::Internal)?;
 
-            let response = generate_tokens_and_response(user, &env)?;
+            let response = generate_tokens_and_response(user, &env, None)?;
             Ok(Json(response).into_response())
         }
         _ => Err(AppError::BadRequest("Unsupported grant_type".to_string())),

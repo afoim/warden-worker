@@ -81,6 +81,24 @@ pub fn api_router(env: Env) -> Router {
             put(webauthn::put_webauthn).delete(webauthn::delete_webauthn),
         )
         .route(
+            "/api/webauthn/attestation-options",
+            post(webauthn::webauthn_attestation_options),
+        )
+        .route(
+            "/api/webauthn/assertion-options",
+            post(webauthn::webauthn_assertion_options),
+        )
+        .route(
+            "/api/webauthn/{id}/delete",
+            post(webauthn::webauthn_delete_credential),
+        )
+        .route(
+            "/api/webauthn",
+            get(webauthn::api_webauthn_get)
+                .post(webauthn::webauthn_save_credential)
+                .put(webauthn::webauthn_update_credential),
+        )
+        .route(
             "/api/two-factor/disable",
             put(two_factor::disable_two_factor),
         )
@@ -147,7 +165,6 @@ pub fn api_router(env: Env) -> Router {
         .route("/api/alive", get(config::alive))
         .route("/api/now", get(config::now))
         .route("/api/version", get(config::version))
-        .route("/api/webauthn", get(config::webauthn))
         .route("/api/d1/usage", get(usage::d1_usage))
         .with_state(app_state)
 }

@@ -10,19 +10,40 @@ use sha2::{Digest, Sha256};
 use std::io::Cursor;
 use uuid::Uuid;
 use worker::D1Database;
+use worker::wasm_bindgen::JsValue;
 
 use crate::{error::AppError, jwt};
 
 pub const TWO_FACTOR_PROVIDER_WEBAUTHN: i32 = 7;
+pub const WEBAUTHN_PRF_STATUS_ENABLED: i32 = 0;
+pub const WEBAUTHN_PRF_STATUS_SUPPORTED: i32 = 1;
+pub const WEBAUTHN_PRF_STATUS_UNSUPPORTED: i32 = 2;
 const CHALLENGE_KIND_REGISTER: &str = "register";
 const CHALLENGE_KIND_LOGIN: &str = "login";
 const CHALLENGE_TTL_SECONDS: i64 = 300;
+
+fn opt_str_to_js_value(value: Option<&str>) -> JsValue {
+    match value {
+        Some(v) => JsValue::from_str(v),
+        None => JsValue::NULL,
+    }
+}
 
 #[derive(Debug, Clone)]
 pub struct WebAuthnCredentialSummary {
     pub id: i32,
     pub name: String,
     pub migrated: bool,
+}
+
+#[derive(Debug, Clone)]
+pub struct WebAuthnCredentialApiItem {
+    pub id: i32,
+    pub name: String,
+    pub prf_status: i32,
+    pub encrypted_public_key: Option<String>,
+    pub encrypted_user_key: Option<String>,
+    pub encrypted_private_key: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -49,6 +70,15 @@ struct StoredCredentialLookupRow {
     slot_id: i32,
     public_key_cose_b64: String,
     sign_count: i64,
+    encrypted_user_key: Option<String>,
+    encrypted_private_key: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct PasswordlessLoginResult {
+    pub user_id: String,
+    pub encrypted_user_key: Option<String>,
+    pub encrypted_private_key: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -103,6 +133,10 @@ pub async fn ensure_webauthn_tables(db: &D1Database) -> Result<(), AppError> {
             credential_id_b64url TEXT NOT NULL,
             public_key_cose_b64 TEXT NOT NULL,
             sign_count INTEGER NOT NULL DEFAULT 0,
+            prf_status INTEGER NOT NULL DEFAULT 2,
+            encrypted_public_key TEXT,
+            encrypted_user_key TEXT,
+            encrypted_private_key TEXT,
             created_at TEXT NOT NULL,
             updated_at TEXT NOT NULL,
             PRIMARY KEY (user_id, slot_id),
@@ -137,6 +171,10 @@ pub async fn ensure_webauthn_tables(db: &D1Database) -> Result<(), AppError> {
     let alter_statements = [
         "ALTER TABLE two_factor_webauthn ADD COLUMN name TEXT NOT NULL DEFAULT ''",
         "ALTER TABLE two_factor_webauthn ADD COLUMN sign_count INTEGER NOT NULL DEFAULT 0",
+        "ALTER TABLE two_factor_webauthn ADD COLUMN prf_status INTEGER NOT NULL DEFAULT 2",
+        "ALTER TABLE two_factor_webauthn ADD COLUMN encrypted_public_key TEXT",
+        "ALTER TABLE two_factor_webauthn ADD COLUMN encrypted_user_key TEXT",
+        "ALTER TABLE two_factor_webauthn ADD COLUMN encrypted_private_key TEXT",
         "ALTER TABLE two_factor_webauthn ADD COLUMN created_at TEXT NOT NULL DEFAULT ''",
         "ALTER TABLE two_factor_webauthn ADD COLUMN updated_at TEXT NOT NULL DEFAULT ''",
         "ALTER TABLE webauthn_challenges ADD COLUMN challenge_b64url TEXT",
@@ -165,10 +203,12 @@ pub async fn ensure_webauthn_tables(db: &D1Database) -> Result<(), AppError> {
             "UPDATE two_factor_webauthn
              SET name = COALESCE(name, ''),
                  sign_count = COALESCE(sign_count, 0),
+                 prf_status = COALESCE(prf_status, 2),
                  created_at = COALESCE(NULLIF(created_at, ''), ?1),
                  updated_at = COALESCE(NULLIF(updated_at, ''), ?1)
              WHERE name IS NULL
                 OR sign_count IS NULL
+                OR prf_status IS NULL
                 OR created_at IS NULL OR created_at = ''
                 OR updated_at IS NULL OR updated_at = ''",
         )
@@ -248,6 +288,175 @@ pub async fn list_webauthn_keys(
         });
     }
     Ok(out)
+}
+
+pub async fn list_webauthn_api_items(
+    db: &D1Database,
+    user_id: &str,
+) -> Result<Vec<WebAuthnCredentialApiItem>, AppError> {
+    ensure_webauthn_tables(db).await?;
+    let rows: Vec<Value> = db
+        .prepare(
+            "SELECT slot_id, name, prf_status, encrypted_public_key, encrypted_user_key, encrypted_private_key
+             FROM two_factor_webauthn
+             WHERE user_id = ?1
+             ORDER BY slot_id ASC",
+        )
+        .bind(&[user_id.into()])?
+        .all()
+        .await
+        .map_err(|_| AppError::Database)?
+        .results()?;
+
+    let mut out = Vec::with_capacity(rows.len());
+    for row in rows {
+        let id = row
+            .get("slot_id")
+            .and_then(|v| v.as_i64())
+            .ok_or(AppError::Database)? as i32;
+        let name = row
+            .get("name")
+            .and_then(|v| v.as_str())
+            .unwrap_or_default()
+            .to_string();
+        let prf_status_raw = row
+            .get("prf_status")
+            .and_then(|v| v.as_i64())
+            .unwrap_or(i64::from(WEBAUTHN_PRF_STATUS_UNSUPPORTED)) as i32;
+        let encrypted_public_key = row
+            .get("encrypted_public_key")
+            .and_then(|v| v.as_str())
+            .filter(|v| !v.is_empty())
+            .map(|v| v.to_string());
+        let encrypted_user_key = row
+            .get("encrypted_user_key")
+            .and_then(|v| v.as_str())
+            .filter(|v| !v.is_empty())
+            .map(|v| v.to_string());
+        let encrypted_private_key = row
+            .get("encrypted_private_key")
+            .and_then(|v| v.as_str())
+            .filter(|v| !v.is_empty())
+            .map(|v| v.to_string());
+
+        let has_keyset = encrypted_public_key.is_some() && encrypted_user_key.is_some();
+        let prf_status = if has_keyset {
+            WEBAUTHN_PRF_STATUS_ENABLED
+        } else if prf_status_raw == WEBAUTHN_PRF_STATUS_SUPPORTED {
+            WEBAUTHN_PRF_STATUS_SUPPORTED
+        } else {
+            WEBAUTHN_PRF_STATUS_UNSUPPORTED
+        };
+
+        out.push(WebAuthnCredentialApiItem {
+            id,
+            name,
+            prf_status,
+            encrypted_public_key,
+            encrypted_user_key,
+            encrypted_private_key,
+        });
+    }
+
+    Ok(out)
+}
+
+pub async fn update_webauthn_prf_by_slot(
+    db: &D1Database,
+    user_id: &str,
+    slot_id: i32,
+    prf_status: i32,
+    encrypted_public_key: Option<&str>,
+    encrypted_user_key: Option<&str>,
+    encrypted_private_key: Option<&str>,
+) -> Result<(), AppError> {
+    ensure_webauthn_tables(db).await?;
+    let exists: Option<i64> = db
+        .prepare(
+            "SELECT COUNT(1) AS total
+             FROM two_factor_webauthn
+             WHERE user_id = ?1 AND slot_id = ?2",
+        )
+        .bind(&[user_id.into(), f64::from(slot_id).into()])?
+        .first(Some("total"))
+        .await
+        .map_err(|_| AppError::Database)?;
+    if exists.unwrap_or(0) == 0 {
+        return Err(AppError::NotFound("WebAuthn key not found".to_string()));
+    }
+
+    db.prepare(
+        "UPDATE two_factor_webauthn
+         SET prf_status = ?1,
+             encrypted_public_key = ?2,
+             encrypted_user_key = ?3,
+             encrypted_private_key = ?4,
+             updated_at = ?5
+         WHERE user_id = ?6 AND slot_id = ?7",
+    )
+    .bind(&[
+        f64::from(prf_status).into(),
+        opt_str_to_js_value(encrypted_public_key).into(),
+        opt_str_to_js_value(encrypted_user_key).into(),
+        opt_str_to_js_value(encrypted_private_key).into(),
+        Utc::now().to_rfc3339().into(),
+        user_id.into(),
+        f64::from(slot_id).into(),
+    ])?
+    .run()
+    .await
+    .map_err(|_| AppError::Database)?;
+
+    Ok(())
+}
+
+pub async fn update_webauthn_prf_by_credential_id(
+    db: &D1Database,
+    user_id: &str,
+    credential_id_b64url: &str,
+    prf_status: i32,
+    encrypted_public_key: Option<&str>,
+    encrypted_user_key: Option<&str>,
+    encrypted_private_key: Option<&str>,
+) -> Result<(), AppError> {
+    ensure_webauthn_tables(db).await?;
+    let exists: Option<i64> = db
+        .prepare(
+            "SELECT COUNT(1) AS total
+             FROM two_factor_webauthn
+             WHERE user_id = ?1 AND credential_id_b64url = ?2",
+        )
+        .bind(&[user_id.into(), credential_id_b64url.into()])?
+        .first(Some("total"))
+        .await
+        .map_err(|_| AppError::Database)?;
+    if exists.unwrap_or(0) == 0 {
+        return Err(AppError::NotFound("WebAuthn key not found".to_string()));
+    }
+
+    db.prepare(
+        "UPDATE two_factor_webauthn
+         SET prf_status = ?1,
+             encrypted_public_key = ?2,
+             encrypted_user_key = ?3,
+             encrypted_private_key = ?4,
+             updated_at = ?5
+         WHERE user_id = ?6 AND credential_id_b64url = ?7",
+    )
+    .bind(&[
+        f64::from(prf_status).into(),
+        opt_str_to_js_value(encrypted_public_key).into(),
+        opt_str_to_js_value(encrypted_user_key).into(),
+        opt_str_to_js_value(encrypted_private_key).into(),
+        Utc::now().to_rfc3339().into(),
+        user_id.into(),
+        credential_id_b64url.into(),
+    ])?
+    .run()
+    .await
+    .map_err(|_| AppError::Database)?;
+
+    Ok(())
 }
 
 pub async fn delete_webauthn_key(
@@ -600,7 +809,7 @@ pub async fn verify_passwordless_login_assertion(
     challenge_token: &str,
     assertion_token_json: &str,
     jwt_secret: &str,
-) -> Result<String, AppError> {
+) -> Result<PasswordlessLoginResult, AppError> {
     ensure_webauthn_tables(db).await?;
     let claims: WebAuthnLoginTokenClaims = jwt::decode_hs256(challenge_token, jwt_secret)?;
 
@@ -671,7 +880,25 @@ pub async fn verify_passwordless_login_assertion(
         .map_err(|_| AppError::Database)?;
     }
 
-    Ok(stored.user_id)
+    Ok(PasswordlessLoginResult {
+        user_id: stored.user_id,
+        encrypted_user_key: stored.encrypted_user_key,
+        encrypted_private_key: stored.encrypted_private_key,
+    })
+}
+
+pub fn extract_assertion_credential_id_b64url(assertion_token_json: &str) -> Result<String, AppError> {
+    let assertion: WebAuthnAssertionToken = serde_json::from_str(assertion_token_json)
+        .map_err(|_| AppError::BadRequest("Invalid WebAuthn assertion".to_string()))?;
+    let credential_id_raw = match assertion.raw_id.or(assertion.id) {
+        Some(v) => decode_b64_any(&v)?,
+        None => {
+            return Err(AppError::BadRequest(
+                "Missing WebAuthn credential id".to_string(),
+            ))
+        }
+    };
+    Ok(encode_b64url(&credential_id_raw))
 }
 
 fn random_challenge_b64url() -> String {
@@ -1091,7 +1318,7 @@ async fn get_stored_credential_by_credential_id(
 ) -> Result<Option<StoredCredentialLookupRow>, AppError> {
     let row: Option<Value> = db
         .prepare(
-            "SELECT user_id, slot_id, public_key_cose_b64, sign_count
+            "SELECT user_id, slot_id, public_key_cose_b64, sign_count, encrypted_user_key, encrypted_private_key
              FROM two_factor_webauthn
              WHERE credential_id_b64url = ?1
              LIMIT 1",
@@ -1120,12 +1347,22 @@ async fn get_stored_credential_by_credential_id(
         .ok_or(AppError::Database)?
         .to_string();
     let sign_count = row.get("sign_count").and_then(|v| v.as_i64()).unwrap_or(0);
+    let encrypted_user_key = row
+        .get("encrypted_user_key")
+        .and_then(|v| v.as_str())
+        .map(|v| v.to_string());
+    let encrypted_private_key = row
+        .get("encrypted_private_key")
+        .and_then(|v| v.as_str())
+        .map(|v| v.to_string());
 
     Ok(Some(StoredCredentialLookupRow {
         user_id,
         slot_id,
         public_key_cose_b64,
         sign_count,
+        encrypted_user_key,
+        encrypted_private_key,
     }))
 }
 
@@ -1143,13 +1380,19 @@ async fn upsert_credential(
     let public_key_cose_b64 = general_purpose::STANDARD.encode(credential_public_key_cose);
     db.prepare(
         "INSERT INTO two_factor_webauthn (
-            user_id, slot_id, name, credential_id_b64url, public_key_cose_b64, sign_count, created_at, updated_at
-         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+            user_id, slot_id, name, credential_id_b64url, public_key_cose_b64, sign_count,
+            prf_status, encrypted_public_key, encrypted_user_key, encrypted_private_key,
+            created_at, updated_at
+         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
          ON CONFLICT(user_id, slot_id) DO UPDATE SET
             name = excluded.name,
             credential_id_b64url = excluded.credential_id_b64url,
             public_key_cose_b64 = excluded.public_key_cose_b64,
             sign_count = excluded.sign_count,
+            prf_status = excluded.prf_status,
+            encrypted_public_key = excluded.encrypted_public_key,
+            encrypted_user_key = excluded.encrypted_user_key,
+            encrypted_private_key = excluded.encrypted_private_key,
             updated_at = excluded.updated_at",
     )
     .bind(&[
@@ -1159,6 +1402,10 @@ async fn upsert_credential(
         credential_id_b64url.into(),
         public_key_cose_b64.into(),
         (sign_count as f64).into(),
+        f64::from(WEBAUTHN_PRF_STATUS_UNSUPPORTED).into(),
+        JsValue::NULL.into(),
+        JsValue::NULL.into(),
+        JsValue::NULL.into(),
         now.clone().into(),
         now.into(),
     ])?
