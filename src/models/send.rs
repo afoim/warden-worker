@@ -23,9 +23,7 @@ where
             if s.is_empty() {
                 return Ok(None);
             }
-            s.parse::<i32>()
-                .map(Some)
-                .map_err(serde::de::Error::custom)
+            s.parse::<i32>().map(Some).map_err(serde::de::Error::custom)
         }
         _ => Err(serde::de::Error::custom("Invalid value")),
     }
@@ -102,9 +100,7 @@ where
             if s.is_empty() {
                 return Ok(None);
             }
-            s.parse::<i64>()
-                .map(Some)
-                .map_err(serde::de::Error::custom)
+            s.parse::<i64>().map(Some).map_err(serde::de::Error::custom)
         }
         _ => Err(serde::de::Error::custom("Invalid value")),
     }
@@ -184,7 +180,9 @@ pub fn access_id_from_uuid(send_id: &str) -> String {
 }
 
 pub fn uuid_from_access_id(access_id: &str) -> Option<String> {
-    let bytes = general_purpose::URL_SAFE_NO_PAD.decode(access_id.as_bytes()).ok()?;
+    let bytes = general_purpose::URL_SAFE_NO_PAD
+        .decode(access_id.as_bytes())
+        .ok()?;
     if bytes.len() != 16 {
         return None;
     }

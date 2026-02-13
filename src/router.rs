@@ -46,14 +46,68 @@ pub fn api_router(env: Env) -> Router {
             "/api/accounts/verify-password",
             post(accounts::verify_password),
         )
-        .route(
-            "/accounts/verify-password",
-            post(accounts::verify_password),
-        )
+        .route("/accounts/verify-password", post(accounts::verify_password))
         .route("/api/devices/knowndevice", get(devices::knowndevice))
+        .route("/api/devices/knowndevice/", get(devices::knowndevice))
+        .route("/api/devices", get(devices::get_devices))
+        .route("/api/devices/", get(devices::get_devices))
+        .route("/api/devices/identifier/{id}", get(devices::get_device))
+        .route("/api/devices/identifier/{id}/", get(devices::get_device))
         .route(
             "/api/devices/identifier/{id}/token",
             put(devices::device_token).post(devices::device_token),
+        )
+        .route(
+            "/api/devices/identifier/{id}/token/",
+            put(devices::device_token).post(devices::device_token),
+        )
+        .route(
+            "/api/devices/identifier/{id}/clear-token",
+            put(devices::clear_device_token).post(devices::clear_device_token),
+        )
+        .route(
+            "/api/devices/identifier/{id}/clear-token/",
+            put(devices::clear_device_token).post(devices::clear_device_token),
+        )
+        .route(
+            "/api/auth-requests",
+            get(devices::get_auth_requests).post(devices::post_auth_request),
+        )
+        .route(
+            "/api/auth-requests/admin-request",
+            post(devices::post_auth_request),
+        )
+        .route(
+            "/api/auth-requests/",
+            get(devices::get_auth_requests).post(devices::post_auth_request),
+        )
+        .route(
+            "/api/auth-requests/admin-request/",
+            post(devices::post_auth_request),
+        )
+        .route(
+            "/api/auth-requests/pending",
+            get(devices::get_auth_requests_pending),
+        )
+        .route(
+            "/api/auth-requests/pending/",
+            get(devices::get_auth_requests_pending),
+        )
+        .route(
+            "/api/auth-requests/{id}",
+            get(devices::get_auth_request).put(devices::put_auth_request),
+        )
+        .route(
+            "/api/auth-requests/{id}/",
+            get(devices::get_auth_request).put(devices::put_auth_request),
+        )
+        .route(
+            "/api/auth-requests/{id}/response",
+            get(devices::get_auth_request_response),
+        )
+        .route(
+            "/api/auth-requests/{id}/response/",
+            get(devices::get_auth_request_response),
         )
         .route(
             "/api/accounts/password",

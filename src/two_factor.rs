@@ -108,7 +108,9 @@ pub fn encrypt_secret_with_optional_key(
         .decode(key_b64)
         .map_err(|_| AppError::BadRequest("Invalid TWO_FACTOR_ENC_KEY".to_string()))?;
     if key_bytes.len() != 32 {
-        return Err(AppError::BadRequest("Invalid TWO_FACTOR_ENC_KEY".to_string()));
+        return Err(AppError::BadRequest(
+            "Invalid TWO_FACTOR_ENC_KEY".to_string(),
+        ));
     }
 
     let cipher = Aes256Gcm::new(Key::<Aes256Gcm>::from_slice(&key_bytes));
@@ -144,14 +146,18 @@ pub fn decrypt_secret_with_optional_key(
         return Err(AppError::Internal);
     };
     let Some(key_b64) = two_factor_enc_key_b64 else {
-        return Err(AppError::BadRequest("Missing TWO_FACTOR_ENC_KEY".to_string()));
+        return Err(AppError::BadRequest(
+            "Missing TWO_FACTOR_ENC_KEY".to_string(),
+        ));
     };
 
     let key_bytes = general_purpose::STANDARD
         .decode(key_b64)
         .map_err(|_| AppError::BadRequest("Invalid TWO_FACTOR_ENC_KEY".to_string()))?;
     if key_bytes.len() != 32 {
-        return Err(AppError::BadRequest("Invalid TWO_FACTOR_ENC_KEY".to_string()));
+        return Err(AppError::BadRequest(
+            "Invalid TWO_FACTOR_ENC_KEY".to_string(),
+        ));
     }
 
     let blob = general_purpose::STANDARD

@@ -20,13 +20,17 @@ pub struct Claims {
     pub email: String,
     pub email_verified: bool,
     pub amr: Vec<String>,
+    #[serde(default)]
+    pub device: Option<String>,
 }
 
-impl FromRequestParts<Arc<Env>> for Claims
-{
+impl FromRequestParts<Arc<Env>> for Claims {
     type Rejection = AppError;
 
-    async fn from_request_parts(parts: &mut Parts, state: &Arc<Env>) -> Result<Self, Self::Rejection> {
+    async fn from_request_parts(
+        parts: &mut Parts,
+        state: &Arc<Env>,
+    ) -> Result<Self, Self::Rejection> {
         // Extract the token from the authorization header
         let token = parts
             .headers

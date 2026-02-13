@@ -7,7 +7,9 @@ use worker::{query, Env};
 use crate::auth::Claims;
 use crate::db;
 use crate::error::AppError;
-use crate::models::cipher::{Cipher, CipherData, CipherRequestData, CreateCipherRequest, CipherRequestFlat};
+use crate::models::cipher::{
+    Cipher, CipherData, CipherRequestData, CipherRequestFlat, CreateCipherRequest,
+};
 use axum::extract::Path;
 use serde::Deserialize;
 

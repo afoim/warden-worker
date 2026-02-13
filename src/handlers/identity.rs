@@ -8,13 +8,14 @@ use rand::RngCore;
 use serde::de::{self, Deserializer};
 use serde::Deserialize;
 use serde_json::{json, Value};
-use sha2::{Digest, Sha256};
 use std::sync::Arc;
 use uuid::Uuid;
+use wasm_bindgen::JsValue;
 use worker::Env;
 
 use crate::{
-    auth::Claims, db, error::AppError, jwt, models::user::User, two_factor, webauthn,
+    auth::Claims, db, error::AppError, handlers::devices, jwt, models::user::User, notifications,
+    two_factor, webauthn,
 };
 
 fn deserialize_trimmed_i32_opt<'de, D>(deserializer: D) -> Result<Option<i32>, D::Error>
@@ -60,6 +61,8 @@ pub struct TokenRequest {
     #[serde(rename = "twoFactorRemember")]
     #[serde(default, deserialize_with = "deserialize_trimmed_i32_opt")]
     two_factor_remember: Option<i32>,
+    #[serde(rename = "authRequest", alias = "authrequest")]
+    auth_request: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -71,6 +74,7 @@ struct WebAuthnPrfOptionPayload {
 fn generate_tokens_and_response(
     user: User,
     env: &Arc<Env>,
+    device_identifier: Option<&str>,
     webauthn_prf_option: Option<&WebAuthnPrfOptionPayload>,
 ) -> Result<Value, AppError> {
     let now = Utc::now();
@@ -86,6 +90,7 @@ fn generate_tokens_and_response(
         email: user.email.clone(),
         email_verified: true,
         amr: vec!["Application".into()],
+        device: device_identifier.map(str::to_string),
     };
 
     let jwt_secret = env.secret("JWT_SECRET")?.to_string();
@@ -102,6 +107,7 @@ fn generate_tokens_and_response(
         email: user.email.clone(),
         email_verified: true,
         amr: vec!["Application".into()],
+        device: device_identifier.map(str::to_string),
     };
     let jwt_refresh_secret = env.secret("JWT_REFRESH_SECRET")?.to_string();
     let refresh_token = jwt::encode_hs256(&refresh_claims, &jwt_refresh_secret)?;
@@ -161,43 +167,152 @@ fn generate_tokens_and_response(
     }))
 }
 
-async fn ensure_devices_table(db: &worker::D1Database) -> Result<(), AppError> {
-    db.prepare(
-        "CREATE TABLE IF NOT EXISTS devices (
-            id TEXT PRIMARY KEY NOT NULL,
-            user_id TEXT NOT NULL,
-            device_identifier TEXT NOT NULL,
-            device_name TEXT,
-            device_type INTEGER,
-            remember_token_hash TEXT,
-            created_at TEXT NOT NULL,
-            updated_at TEXT NOT NULL,
-            UNIQUE(user_id, device_identifier),
-            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
-        )",
-    )
-    .run()
-    .await
-    .map_err(|_| AppError::Database)?;
-
-    let _ = db
-        .prepare("ALTER TABLE devices ADD COLUMN remember_token_hash TEXT")
-        .run()
-        .await;
-
-    Ok(())
-}
-
-fn sha256_hex(input: &str) -> String {
-    let mut hasher = Sha256::new();
-    hasher.update(input.as_bytes());
-    hex::encode(hasher.finalize())
-}
-
 fn generate_remember_token() -> String {
     let mut bytes = [0u8; 32];
     rand::rngs::OsRng.fill_bytes(&mut bytes);
     general_purpose::URL_SAFE_NO_PAD.encode(bytes)
+}
+
+fn to_js_val<T: Into<JsValue>>(val: Option<T>) -> JsValue {
+    val.map(Into::into).unwrap_or(JsValue::NULL)
+}
+
+async fn ensure_device_record_exists_for_login(
+    db: &worker::D1Database,
+    user_id: &str,
+    device_identifier: Option<&str>,
+    device_name: Option<&str>,
+    device_type: Option<i32>,
+) -> Result<(), AppError> {
+    let Some(device_identifier) = device_identifier else {
+        return Ok(());
+    };
+
+    devices::ensure_devices_table(db).await?;
+    let now = Utc::now().to_rfc3339();
+    let device_name_value = to_js_val(device_name.map(str::to_string));
+    let device_type_value = to_js_val(device_type.map(f64::from));
+    if let Ok(stmt) = db
+        .prepare(
+            "INSERT INTO devices (
+                id, user_id, device_identifier, device_name, device_type,
+                remember_token_hash, push_token, created_at, updated_at
+             )
+             VALUES (?1, ?2, ?3, ?4, ?5, NULL, NULL, ?6, ?7)
+             ON CONFLICT(user_id, device_identifier) DO NOTHING",
+        )
+        .bind(&[
+            Uuid::new_v4().to_string().into(),
+            user_id.to_string().into(),
+            device_identifier.to_string().into(),
+            device_name_value.into(),
+            device_type_value.into(),
+            now.clone().into(),
+            now.into(),
+        ])
+    {
+        let _ = stmt.run().await;
+    }
+
+    Ok(())
+}
+
+async fn validate_auth_request_login(
+    db: &worker::D1Database,
+    user_id: &str,
+    auth_request_id: &str,
+    access_code: &str,
+    headers: &HeaderMap,
+) -> Result<(), AppError> {
+    devices::ensure_auth_requests_table(db).await?;
+    devices::purge_expired_auth_requests(db).await?;
+
+    let row: Option<Value> = db
+        .prepare(
+            "SELECT approved, creation_date, request_ip, access_code_hash
+             FROM auth_requests
+             WHERE id = ?1 AND user_id = ?2
+             LIMIT 1",
+        )
+        .bind(&[auth_request_id.into(), user_id.into()])?
+        .first(None)
+        .await
+        .map_err(|_| AppError::Unauthorized("Invalid credentials".to_string()))?;
+    let Some(row) = row else {
+        return Err(AppError::Unauthorized("Invalid credentials".to_string()));
+    };
+
+    let approved = row
+        .get("approved")
+        .and_then(|v| {
+            if v.is_null() {
+                None
+            } else if let Some(b) = v.as_bool() {
+                Some(b)
+            } else {
+                v.as_i64().map(|i| i != 0)
+            }
+        })
+        .unwrap_or(false);
+    if !approved {
+        return Err(AppError::Unauthorized("Invalid credentials".to_string()));
+    }
+
+    let creation_date = row
+        .get("creation_date")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| AppError::Unauthorized("Invalid credentials".to_string()))?;
+    let created_at = chrono::DateTime::parse_from_rfc3339(creation_date)
+        .map_err(|_| AppError::Unauthorized("Invalid credentials".to_string()))?
+        .with_timezone(&Utc);
+    if Utc::now() >= created_at + Duration::minutes(5) {
+        return Err(AppError::Unauthorized("Invalid credentials".to_string()));
+    }
+
+    let request_ip = row
+        .get("request_ip")
+        .and_then(|v| v.as_str())
+        .unwrap_or_default();
+    let current_ip = devices::client_ip_from_headers(headers);
+    if request_ip != current_ip {
+        return Err(AppError::Unauthorized("Invalid credentials".to_string()));
+    }
+
+    let stored_hash = row
+        .get("access_code_hash")
+        .and_then(|v| v.as_str())
+        .unwrap_or_default();
+    let candidate_hash = devices::sha256_hex(access_code);
+    if !constant_time_eq(stored_hash.as_bytes(), candidate_hash.as_bytes()) {
+        return Err(AppError::Unauthorized("Invalid credentials".to_string()));
+    }
+
+    Ok(())
+}
+
+async fn retract_pending_auth_requests_for_device(
+    db: &worker::D1Database,
+    user_id: &str,
+    device_identifier: Option<&str>,
+) -> Result<(), AppError> {
+    let Some(device_identifier) = device_identifier else {
+        return Ok(());
+    };
+
+    devices::ensure_auth_requests_table(db).await?;
+    devices::purge_expired_auth_requests(db).await?;
+    db.prepare(
+        "DELETE FROM auth_requests
+         WHERE user_id = ?1
+           AND request_device_identifier = ?2
+           AND approved IS NULL",
+    )
+    .bind(&[user_id.into(), device_identifier.into()])?
+    .run()
+    .await
+    .map_err(|_| AppError::Database)?;
+
+    Ok(())
 }
 
 async fn two_factor_metadata(
@@ -309,13 +424,31 @@ pub async fn token(
                 .map_err(|_| AppError::Unauthorized("Invalid credentials".to_string()))?
                 .ok_or_else(|| AppError::Unauthorized("Invalid credentials".to_string()))?;
             let user: User = serde_json::from_value(user).map_err(|_| AppError::Internal)?;
-            // Securely compare the provided hash with the stored hash
-            if !constant_time_eq(
+            let auth_request_id = payload.auth_request.clone();
+            if let Some(auth_request_id) = auth_request_id.as_deref() {
+                validate_auth_request_login(
+                    &db,
+                    &user.id,
+                    auth_request_id,
+                    &password_hash,
+                    &headers,
+                )
+                .await?;
+            } else if !constant_time_eq(
                 user.master_password_hash.as_bytes(),
                 password_hash.as_bytes(),
             ) {
                 return Err(AppError::Unauthorized("Invalid credentials".to_string()));
             }
+
+            ensure_device_record_exists_for_login(
+                &db,
+                &user.id,
+                payload.device_identifier.as_deref(),
+                payload.device_name.as_deref(),
+                payload.device_type,
+            )
+            .await?;
 
             let authenticator_enabled = two_factor::is_authenticator_enabled(&db, &user.id).await?;
             let webauthn_enabled = webauthn::is_webauthn_enabled(&db, &user.id).await?;
@@ -334,7 +467,7 @@ pub async fn token(
                         return two_factor_required_response(&db, &user.id, &headers).await;
                     };
 
-                    ensure_devices_table(&db).await?;
+                    devices::ensure_devices_table(&db).await?;
                     let row: Option<Value> = db
                         .prepare(
                             "SELECT remember_token_hash FROM devices WHERE user_id = ?1 AND device_identifier = ?2",
@@ -349,7 +482,7 @@ pub async fn token(
                     let Some(stored_hash) = stored_hash else {
                         return two_factor_required_response(&db, &user.id, &headers).await;
                     };
-                    let candidate_hash = sha256_hex(token);
+                    let candidate_hash = devices::sha256_hex(token);
                     if !constant_time_eq(stored_hash.as_bytes(), candidate_hash.as_bytes()) {
                         return two_factor_required_response(&db, &user.id, &headers).await;
                     }
@@ -402,18 +535,22 @@ pub async fn token(
             let device_name = payload.device_name.clone();
             let device_type = payload.device_type;
 
-            let mut response = generate_tokens_and_response(user, &env, None)?;
+            let mut response =
+                generate_tokens_and_response(user, &env, device_identifier.as_deref(), None)?;
 
             if let Some(device_identifier) = device_identifier.as_deref() {
-                ensure_devices_table(&db).await?;
+                devices::ensure_devices_table(&db).await?;
 
                 let now = Utc::now().to_rfc3339();
-                let remember_hash = remember_token_to_return.as_deref().map(sha256_hex);
+                let remember_hash = remember_token_to_return.as_deref().map(devices::sha256_hex);
+                let device_name_value = to_js_val(device_name.clone());
+                let device_type_value = to_js_val(device_type.map(f64::from));
+                let remember_hash_value = to_js_val(remember_hash.clone());
 
                 if let Ok(stmt) = db
                     .prepare(
-                        "INSERT INTO devices (id, user_id, device_identifier, device_name, device_type, remember_token_hash, created_at, updated_at)
-                         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+                        "INSERT INTO devices (id, user_id, device_identifier, device_name, device_type, remember_token_hash, push_token, created_at, updated_at)
+                         VALUES (?1, ?2, ?3, ?4, ?5, ?6, NULL, ?7, ?8)
                          ON CONFLICT(user_id, device_identifier) DO UPDATE SET
                            updated_at = excluded.updated_at,
                            device_name = excluded.device_name,
@@ -424,9 +561,9 @@ pub async fn token(
                         Uuid::new_v4().to_string().into(),
                         user_id.clone().into(),
                         device_identifier.into(),
-                        device_name.clone().into(),
-                        device_type.map(f64::from).into(),
-                        remember_hash.clone().into(),
+                        device_name_value.into(),
+                        device_type_value.into(),
+                        remember_hash_value.into(),
                         now.clone().into(),
                         now.into(),
                     ])
@@ -440,6 +577,35 @@ pub async fn token(
                     obj.insert("TwoFactorToken".to_string(), Value::String(token));
                 }
             }
+
+            if let Some(auth_request_id) = auth_request_id {
+                if let Ok(stmt) = db
+                    .prepare(
+                        "UPDATE auth_requests SET authentication_date = ?1 WHERE id = ?2 AND user_id = ?3",
+                    )
+                    .bind(&[
+                        Utc::now().to_rfc3339().into(),
+                        auth_request_id.clone().into(),
+                        user_id.clone().into(),
+                    ])
+                {
+                    let _ = stmt.run().await;
+                }
+
+                if let Err(err) =
+                    notifications::close_anonymous_subscription(env.as_ref(), &auth_request_id)
+                        .await
+                {
+                    log::warn!("close anonymous auth websocket failed: {err}");
+                }
+            }
+
+            let _ = retract_pending_auth_requests_for_device(
+                &db,
+                &user_id,
+                device_identifier.as_deref(),
+            )
+            .await;
 
             Ok(Json(response).into_response())
         }
@@ -490,17 +656,23 @@ pub async fn token(
                 _ => None,
             };
 
-            let response =
-                generate_tokens_and_response(user, &env, webauthn_prf_option.as_ref())?;
+            let response = generate_tokens_and_response(
+                user,
+                &env,
+                device_identifier.as_deref(),
+                webauthn_prf_option.as_ref(),
+            )?;
 
             if let Some(device_identifier) = device_identifier.as_deref() {
-                ensure_devices_table(&db).await?;
+                devices::ensure_devices_table(&db).await?;
 
                 let now = Utc::now().to_rfc3339();
+                let device_name_value = to_js_val(device_name.clone());
+                let device_type_value = to_js_val(device_type.map(f64::from));
                 if let Ok(stmt) = db
                     .prepare(
-                        "INSERT INTO devices (id, user_id, device_identifier, device_name, device_type, remember_token_hash, created_at, updated_at)
-                         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+                        "INSERT INTO devices (id, user_id, device_identifier, device_name, device_type, remember_token_hash, push_token, created_at, updated_at)
+                         VALUES (?1, ?2, ?3, ?4, ?5, ?6, NULL, ?7, ?8)
                          ON CONFLICT(user_id, device_identifier) DO UPDATE SET
                            updated_at = excluded.updated_at,
                            device_name = excluded.device_name,
@@ -511,9 +683,9 @@ pub async fn token(
                         Uuid::new_v4().to_string().into(),
                         user_id.clone().into(),
                         device_identifier.into(),
-                        device_name.clone().into(),
-                        device_type.map(f64::from).into(),
-                        Option::<String>::None.into(),
+                        device_name_value.into(),
+                        device_type_value.into(),
+                        JsValue::NULL.into(),
                         now.clone().into(),
                         now.into(),
                     ])
@@ -521,6 +693,13 @@ pub async fn token(
                     let _ = stmt.run().await;
                 }
             }
+
+            let _ = retract_pending_auth_requests_for_device(
+                &db,
+                &user_id,
+                device_identifier.as_deref(),
+            )
+            .await;
 
             Ok(Json(response).into_response())
         }
@@ -543,7 +722,8 @@ pub async fn token(
                 .ok_or_else(|| AppError::Unauthorized("Invalid user".to_string()))?;
             let user: User = serde_json::from_value(user).map_err(|_| AppError::Internal)?;
 
-            let response = generate_tokens_and_response(user, &env, None)?;
+            let response =
+                generate_tokens_and_response(user, &env, token_data.device.as_deref(), None)?;
             Ok(Json(response).into_response())
         }
         _ => Err(AppError::BadRequest("Unsupported grant_type".to_string())),

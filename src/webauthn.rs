@@ -9,8 +9,8 @@ use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use std::io::Cursor;
 use uuid::Uuid;
-use worker::D1Database;
 use worker::wasm_bindgen::JsValue;
+use worker::D1Database;
 
 use crate::{error::AppError, jwt};
 
@@ -319,10 +319,10 @@ pub async fn list_webauthn_api_items(
             .and_then(|v| v.as_str())
             .unwrap_or_default()
             .to_string();
-        let prf_status_raw = row
-            .get("prf_status")
-            .and_then(|v| v.as_i64())
-            .unwrap_or(i64::from(WEBAUTHN_PRF_STATUS_UNSUPPORTED)) as i32;
+        let prf_status_raw =
+            row.get("prf_status")
+                .and_then(|v| v.as_i64())
+                .unwrap_or(i64::from(WEBAUTHN_PRF_STATUS_UNSUPPORTED)) as i32;
         let encrypted_public_key = row
             .get("encrypted_public_key")
             .and_then(|v| v.as_str())
@@ -887,7 +887,9 @@ pub async fn verify_passwordless_login_assertion(
     })
 }
 
-pub fn extract_assertion_credential_id_b64url(assertion_token_json: &str) -> Result<String, AppError> {
+pub fn extract_assertion_credential_id_b64url(
+    assertion_token_json: &str,
+) -> Result<String, AppError> {
     let assertion: WebAuthnAssertionToken = serde_json::from_str(assertion_token_json)
         .map_err(|_| AppError::BadRequest("Invalid WebAuthn assertion".to_string()))?;
     let credential_id_raw = match assertion.raw_id.or(assertion.id) {

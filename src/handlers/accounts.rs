@@ -52,22 +52,15 @@ pub struct VerifyPasswordRequest {
 }
 
 #[worker::send]
-pub async fn profile(
-    claims: Claims,
-    State(env): State<Arc<Env>>,
-) -> Result<Json<Value>, AppError> {
+pub async fn profile(claims: Claims, State(env): State<Arc<Env>>) -> Result<Json<Value>, AppError> {
     let db = db::get_db(&env)?;
     let two_factor_enabled = two_factor::is_authenticator_enabled(&db, &claims.sub).await?
         || webauthn::is_webauthn_enabled(&db, &claims.sub).await?;
-    let user: User = query!(
-        &db,
-        "SELECT * FROM users WHERE id = ?1",
-        claims.sub
-    )
-    .map_err(|_| AppError::Database)?
-    .first(None)
-    .await?
-    .ok_or(AppError::NotFound("User not found".to_string()))?;
+    let user: User = query!(&db, "SELECT * FROM users WHERE id = ?1", claims.sub)
+        .map_err(|_| AppError::Database)?
+        .first(None)
+        .await?
+        .ok_or(AppError::NotFound("User not found".to_string()))?;
 
     Ok(Json(json!({
         "id": user.id,
@@ -88,9 +81,7 @@ pub async fn profile(
 }
 
 #[worker::send]
-pub async fn revision_date(
-    _claims: Claims,
-) -> Result<Json<i64>, AppError> {
+pub async fn revision_date(_claims: Claims) -> Result<Json<i64>, AppError> {
     Ok(Json(chrono::Utc::now().timestamp_millis()))
 }
 
@@ -106,10 +97,7 @@ pub async fn prelogin(
 
     let stmt = db.prepare("SELECT kdf_type, kdf_iterations FROM users WHERE email = ?1");
     let query = stmt.bind(&[email.to_lowercase().into()])?;
-    let kdf_row: Option<Value> = query
-        .first(None)
-        .await
-        .map_err(|_| AppError::Database)?;
+    let kdf_row: Option<Value> = query.first(None).await.map_err(|_| AppError::Database)?;
     let kdf = kdf_row
         .as_ref()
         .and_then(|row| row.get("kdf_type"))
@@ -212,7 +200,9 @@ pub async fn change_master_password(
     Json(payload): Json<ChangeMasterPasswordRequest>,
 ) -> Result<Json<Value>, AppError> {
     if payload.master_password_hash.is_empty() || payload.new_master_password_hash.is_empty() {
-        return Err(AppError::BadRequest("Missing masterPasswordHash".to_string()));
+        return Err(AppError::BadRequest(
+            "Missing masterPasswordHash".to_string(),
+        ));
     }
     if payload.user_symmetric_key.is_empty() {
         return Err(AppError::BadRequest("Missing userSymmetricKey".to_string()));
@@ -280,7 +270,9 @@ pub async fn change_email(
     Json(payload): Json<ChangeEmailRequest>,
 ) -> Result<Json<Value>, AppError> {
     if payload.master_password_hash.is_empty() || payload.new_master_password_hash.is_empty() {
-        return Err(AppError::BadRequest("Missing masterPasswordHash".to_string()));
+        return Err(AppError::BadRequest(
+            "Missing masterPasswordHash".to_string(),
+        ));
     }
     if payload.new_email.trim().is_empty() {
         return Err(AppError::BadRequest("Missing newEmail".to_string()));
@@ -356,7 +348,9 @@ pub async fn verify_password(
     Json(payload): Json<VerifyPasswordRequest>,
 ) -> Result<Json<Value>, AppError> {
     if payload.master_password_hash.is_empty() {
-        return Err(AppError::BadRequest("Missing masterPasswordHash".to_string()));
+        return Err(AppError::BadRequest(
+            "Missing masterPasswordHash".to_string(),
+        ));
     }
 
     let db = db::get_db(&env)?;

@@ -24,8 +24,7 @@ fn decode_b64url(input: &str) -> Result<Vec<u8>, AppError> {
 }
 
 fn sign(input: &str, secret: &str) -> Result<Vec<u8>, AppError> {
-    let mut mac =
-        HmacSha256::new_from_slice(secret.as_bytes()).map_err(|_| AppError::Internal)?;
+    let mut mac = HmacSha256::new_from_slice(secret.as_bytes()).map_err(|_| AppError::Internal)?;
     mac.update(input.as_bytes());
     Ok(mac.finalize().into_bytes().to_vec())
 }
@@ -54,9 +53,12 @@ pub fn decode_hs256<T: DeserializeOwned>(token: &str, secret: &str) -> Result<T,
     };
 
     let header_bytes = decode_b64url(header_b64)?;
-    let header_json: Value =
-        serde_json::from_slice(&header_bytes).map_err(|_| AppError::Unauthorized("Invalid token".to_string()))?;
-    let alg = header_json.get("alg").and_then(|v| v.as_str()).unwrap_or_default();
+    let header_json: Value = serde_json::from_slice(&header_bytes)
+        .map_err(|_| AppError::Unauthorized("Invalid token".to_string()))?;
+    let alg = header_json
+        .get("alg")
+        .and_then(|v| v.as_str())
+        .unwrap_or_default();
     if alg != "HS256" {
         return Err(AppError::Unauthorized("Invalid token".to_string()));
     }
@@ -69,8 +71,8 @@ pub fn decode_hs256<T: DeserializeOwned>(token: &str, secret: &str) -> Result<T,
     }
 
     let payload_bytes = decode_b64url(payload_b64)?;
-    let payload_json: Value =
-        serde_json::from_slice(&payload_bytes).map_err(|_| AppError::Unauthorized("Invalid token".to_string()))?;
+    let payload_json: Value = serde_json::from_slice(&payload_bytes)
+        .map_err(|_| AppError::Unauthorized("Invalid token".to_string()))?;
 
     let now = chrono::Utc::now().timestamp();
     let exp = payload_json
@@ -86,5 +88,6 @@ pub fn decode_hs256<T: DeserializeOwned>(token: &str, secret: &str) -> Result<T,
         }
     }
 
-    serde_json::from_value(payload_json).map_err(|_| AppError::Unauthorized("Invalid token".to_string()))
+    serde_json::from_value(payload_json)
+        .map_err(|_| AppError::Unauthorized("Invalid token".to_string()))
 }

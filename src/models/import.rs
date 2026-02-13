@@ -22,7 +22,6 @@ pub struct ImportCipher {
     pub encrypted_for: String,
 }
 
-
 #[derive(Deserialize, Debug)]
 #[serde(rename_all = "camelCase")]
 pub struct ImportFolder {

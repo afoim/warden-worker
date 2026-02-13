@@ -2,8 +2,8 @@ use axum::{extract::State, Json};
 use chrono::Utc;
 use std::sync::Arc;
 use uuid::Uuid;
-use worker::{D1Database, D1PreparedStatement, Env};
 use wasm_bindgen::JsValue;
+use worker::{D1Database, D1PreparedStatement, Env};
 
 use crate::auth::Claims;
 use crate::db;
@@ -63,7 +63,9 @@ pub async fn import_data(
     let mut cipher_stmts: Vec<D1PreparedStatement> = Vec::new();
     for import_cipher in payload.ciphers {
         if import_cipher.encrypted_for != claims.sub {
-            return Err(AppError::BadRequest("Cipher encrypted for wrong user".to_string()));
+            return Err(AppError::BadRequest(
+                "Cipher encrypted for wrong user".to_string(),
+            ));
         }
 
         let cipher_data = CipherData {

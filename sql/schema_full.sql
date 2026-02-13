@@ -4,6 +4,7 @@
 PRAGMA foreign_keys = ON;
 
 DROP TABLE IF EXISTS devices;
+DROP TABLE IF EXISTS auth_requests;
 DROP TABLE IF EXISTS two_factor_authenticator;
 DROP TABLE IF EXISTS webauthn_challenges;
 DROP TABLE IF EXISTS two_factor_webauthn;
@@ -148,9 +149,28 @@ CREATE TABLE IF NOT EXISTS devices (
     device_name TEXT,
     device_type INTEGER,
     remember_token_hash TEXT,
+    push_token TEXT,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
     UNIQUE(user_id, device_identifier),
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS auth_requests (
+    id TEXT PRIMARY KEY NOT NULL,
+    user_id TEXT NOT NULL,
+    request_device_identifier TEXT NOT NULL,
+    device_type INTEGER NOT NULL,
+    request_ip TEXT NOT NULL,
+    response_device_identifier TEXT,
+    access_code_hash TEXT NOT NULL,
+    public_key TEXT NOT NULL,
+    enc_key TEXT,
+    master_password_hash TEXT,
+    approved INTEGER,
+    creation_date TEXT NOT NULL,
+    response_date TEXT,
+    authentication_date TEXT,
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 );
 
@@ -163,3 +183,4 @@ CREATE INDEX IF NOT EXISTS idx_send_file_chunks_send_file_id ON send_file_chunks
 CREATE INDEX IF NOT EXISTS idx_folders_user_id ON folders(user_id);
 CREATE INDEX IF NOT EXISTS idx_two_factor_webauthn_user_id ON two_factor_webauthn(user_id);
 CREATE INDEX IF NOT EXISTS idx_devices_user_id ON devices(user_id);
+CREATE INDEX IF NOT EXISTS idx_auth_requests_user_id ON auth_requests(user_id);

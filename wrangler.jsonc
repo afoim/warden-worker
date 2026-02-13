@@ -9,7 +9,23 @@
   "d1_databases": [
     {
       "binding": "vault1",
-      "database_id": "897b6fd9-e611-437e-9c7f-703d3674ea1f"
+      "database_id": "8dcbaed4-6fdc-4b14-9f90-20650a732b38"
+    }
+  ],
+
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "NOTIFICATIONS_HUB",
+        "class_name": "NotificationsHub"
+      }
+    ]
+  },
+
+  "migrations": [
+    {
+      "tag": "v1-notifications-hub",
+      "new_sqlite_classes": ["NotificationsHub"]
     }
   ],
 
@@ -30,6 +46,6 @@
   "assets": {
     "directory": "./static/web-vault",
     "not_found_handling": "single-page-application",
-    "run_worker_first": ["/api/*", "/identity/*", "/sends/*", "/demo.html"]
+    "run_worker_first": ["/api/*", "/identity/*", "/sends/*", "/notifications/*", "/demo.html"]
   }
 }

@@ -1,4 +1,7 @@
-use axum::{extract::{Query, State}, Json};
+use axum::{
+    extract::{Query, State},
+    Json,
+};
 use serde::Deserialize;
 use serde_json::{json, Value};
 use std::sync::Arc;
@@ -14,7 +17,11 @@ pub struct UsageQuery {
     user_id: Option<String>,
 }
 
-async fn sum_i64(db: &worker::D1Database, sql: &str, binds: &[worker::wasm_bindgen::JsValue]) -> Result<i64, AppError> {
+async fn sum_i64(
+    db: &worker::D1Database,
+    sql: &str,
+    binds: &[worker::wasm_bindgen::JsValue],
+) -> Result<i64, AppError> {
     let bytes: Option<i64> = db
         .prepare(sql)
         .bind(binds)?
