@@ -27,7 +27,6 @@ impl FromRequestParts<Arc<Env>> for Claims
     type Rejection = AppError;
 
     async fn from_request_parts(parts: &mut Parts, state: &Arc<Env>) -> Result<Self, Self::Rejection> {
-        // Extract the token from the authorization header
         let token = parts
             .headers
             .get(header::AUTHORIZATION)
@@ -38,6 +37,18 @@ impl FromRequestParts<Arc<Env>> for Claims
                 } else {
                     None
                 }
+            })
+            .or_else(|| {
+                let raw = parts.headers.get(header::COOKIE)?.to_str().ok()?;
+                for part in raw.split(';') {
+                    let part = part.trim();
+                    if let Some((k, v)) = part.split_once('=') {
+                        if k.trim() == "bw_access_token" {
+                            return Some(v.trim().to_string());
+                        }
+                    }
+                }
+                None
             })
             .ok_or_else(|| AppError::Unauthorized("Missing or invalid token".to_string()))?;
 
