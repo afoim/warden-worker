@@ -27,6 +27,10 @@ pub fn api_router(env: Env) -> Router {
             post(accounts::send_verification_email),
         )
         .route("/api/accounts/profile", get(accounts::profile))
+        .route(
+            "/api/accounts/security-stamp",
+            post(accounts::post_security_stamp),
+        )
         .route("/api/accounts/revision-date", get(accounts::revision_date))
         .route("/api/devices", get(devices::get_devices))
         .route("/api/devices/identifier/{id}", get(devices::get_device_by_identifier))

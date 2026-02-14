@@ -80,6 +80,54 @@ pub async fn profile(
 }
 
 #[worker::send]
+pub async fn post_security_stamp(
+    claims: Claims,
+    State(env): State<Arc<Env>>,
+) -> Result<Json<Value>, AppError> {
+    let db = db::get_db(&env)?;
+    let now = Utc::now().to_rfc3339();
+    let security_stamp = Uuid::new_v4().to_string();
+
+    db.prepare("UPDATE users SET security_stamp = ?1, updated_at = ?2 WHERE id = ?3")
+        .bind(&[
+            security_stamp.clone().into(),
+            now.into(),
+            claims.sub.clone().into(),
+        ])?
+        .run()
+        .await
+        .map_err(|_| AppError::Database)?;
+
+    let two_factor_enabled = two_factor::is_authenticator_enabled(&db, &claims.sub).await?;
+    let user: User = query!(
+        &db,
+        "SELECT * FROM users WHERE id = ?1",
+        claims.sub
+    )
+    .map_err(|_| AppError::Database)?
+    .first(None)
+    .await?
+    .ok_or(AppError::NotFound("User not found".to_string()))?;
+
+    Ok(Json(json!({
+        "id": user.id,
+        "name": user.name,
+        "email": user.email,
+        "emailVerified": user.email_verified,
+        "premium": true,
+        "premiumFromOrganization": false,
+        "masterPasswordHint": user.master_password_hint,
+        "culture": "en-US",
+        "twoFactorEnabled": two_factor_enabled,
+        "key": user.key,
+        "privateKey": user.private_key,
+        "securityStamp": user.security_stamp,
+        "organizations": [],
+        "object": "profile"
+    })))
+}
+
+#[worker::send]
 pub async fn revision_date(
     _claims: Claims,
 ) -> Result<Json<i64>, AppError> {
