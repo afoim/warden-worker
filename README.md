@@ -15,6 +15,7 @@ Warden Worker 是一个运行在 Cloudflare Workers 上的轻量级 Bitwarden �
 - 兼容多端：官方 Bitwarden（浏览器扩展 / 桌面 / 安卓）与多数第三方客户端
 - 核心能力：注册/登录、同步、密码项（Cipher）增删改、文件夹、TOTP（Authenticator）二步验证
 - 官方安卓兼容：支持 `/api/devices/knowndevice` 与 remember-device（twoFactorProvider=5）流程
+- **安全增强**：支持“踢出所有已登录设备”（Security Stamp 校验），增强了 Token 刷新时的安全性
 
 ## 快速部署（Cloudflare）
 
@@ -45,6 +46,8 @@ wrangler d1 execute vault1 --remote --file=sql/schema_full.sql
 
 ### 3. 配置密钥（Secrets）
 
+为了保证安全性，请务必设置强密码。
+
 ```bash
 wrangler secret put JWT_SECRET
 wrangler secret put JWT_REFRESH_SECRET
@@ -52,10 +55,10 @@ wrangler secret put ALLOWED_EMAILS
 wrangler secret put TWO_FACTOR_ENC_KEY
 ```
 
-- JWT_SECRET：访问令牌签名密钥
-- JWT_REFRESH_SECRET：刷新令牌签名密钥
-- ALLOWED_EMAILS：首个账号注册白名单（仅在“数据库还没有任何用户”时启用），多个邮箱用英文逗号分隔
-- TWO_FACTOR_ENC_KEY：可选，Base64 的 32 字节密钥；用于加密存储 TOTP 秘钥（不设置则以 `plain:` 形式存储）
+- **JWT_SECRET**：访问令牌签名密钥。用于签署短效 Access Token。**必须设置强随机字符串。**
+- **JWT_REFRESH_SECRET**：刷新令牌签名密钥。用于签署长效 Refresh Token。**必须设置强随机字符串，且不要与 JWT_SECRET 相同。**
+- **ALLOWED_EMAILS**：首个账号注册白名单（仅在“数据库还没有任何用户”时启用），多个邮箱用英文逗号分隔。
+- **TWO_FACTOR_ENC_KEY**：可选，Base64 的 32 字节密钥；用于加密存储 TOTP 秘钥（不设置则以 `plain:` 形式存储）。
 
 ### 4. 部署
 
@@ -69,11 +72,13 @@ wrangler deploy
 
 - 官方安卓如果之前指向过其它自托管地址，建议“删除账号/清缓存后重新添加服务器”，避免 remember token 跨服务端复用导致登录失败。
 - 首次启用 TOTP 后，建议在同一台设备上完成一次“输入 TOTP 登录”，后续官方安卓会自动走 remember-device（provider=5）。
+- 如果你在网页端点击了“踢出所有设备”，所有已登录的客户端将在下次尝试刷新 Token 时（通常 2 小时内）被迫登出，需要重新登录。
 
 ## 已实现的关键接口（部分）
 
 - 配置与探测：`GET /api/config`、`GET /api/alive`、`GET /api/now`、`GET /api/version`
 - 登录：`POST /identity/accounts/prelogin`、`POST /identity/connect/token`
+- 账户安全：`POST /api/accounts/security-stamp` (踢出设备)
 - 同步：`GET /api/sync`
 - 密码项：`POST /api/ciphers/create`、`PUT /api/ciphers/{id}`、`PUT /api/ciphers/{id}/delete`
 - 文件夹：`POST /api/folders`、`PUT /api/folders/{id}`、`DELETE /api/folders/{id}`
