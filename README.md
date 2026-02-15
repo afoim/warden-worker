@@ -79,6 +79,7 @@ wrangler deploy
 - 文件夹：`POST /api/folders`、`PUT /api/folders/{id}`、`DELETE /api/folders/{id}`
 - 2FA：`GET /api/two-factor`、`/api/two-factor/authenticator/*`
 - 官方安卓设备探测：`GET /api/devices/knowndevice`
+- icon支持: `GET /icons/{*res}`
 
 ## 本地开发
 

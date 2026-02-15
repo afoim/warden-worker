@@ -39,9 +39,13 @@ jobs:
                     cargo install worker-build
                   fi
 
-            - name: Replace D1_DATABASE_ID in wrangler.toml
-              run: sed -i "s/\${D1_DATABASE_ID}/${{ secrets.D1_DATABASE_ID }}/g" wrangler.toml
-
+            - name: Replace D1_DATABASE_ID in wrangler.jsonc
+              run: |
+                  sed -i 's/"database_id": "[^"]*"/"database_id": "${{ secrets.D1_DATABASE_ID }}"/g' wrangler.jsonc
+            
+            - name: Build worker
+              run: worker-build --release
+            
             - uses: cloudflare/wrangler-action@v3
               id: cf
               env:
@@ -49,3 +53,5 @@ jobs:
               with:
                   apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
                   accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+                  wranglerVersion: "4.65.0"
+

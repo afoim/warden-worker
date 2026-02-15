@@ -7,13 +7,14 @@ use axum::extract::DefaultBodyLimit;
 use std::sync::Arc;
 use worker::Env;
 
-use crate::handlers::{accounts, ciphers, config, identity, sync, folders, import, two_factor, devices, sends, usage};
+use crate::handlers::{accounts, ciphers, config, identity, sync, folders, import, two_factor, devices, sends, usage, icons};
 
 pub fn api_router(env: Env) -> Router {
     let app_state = Arc::new(env);
 
     Router::new()
         .route("/demo.html", get(|| async { Html(include_str!("../static/demo.html")) }))
+        .route("/icons/{*path}", get(icons::get_icon))
         // Identity/Auth routes
         .route("/identity/accounts/prelogin", post(accounts::prelogin))
         .route("/api/accounts/prelogin", post(accounts::prelogin))
