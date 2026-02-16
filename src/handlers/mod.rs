@@ -10,3 +10,4 @@ pub mod devices;
 pub mod sends;
 pub mod usage;
 pub mod icons;
+pub mod settings;

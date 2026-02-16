@@ -19,9 +19,11 @@ Warden Worker 是一个运行在 Cloudflare Workers 上的轻量级 Bitwarden �
 
 ### 0. 前置条件
 
+- 良好的网络环境（**推荐国外**）
 - Cloudflare 账号
 - Node.js + Wrangler：`npm i -g wrangler`
 - Rust 工具链（建议稳定版）
+- [LLVM/Clang（用于编译 Rust 代码）](https://github.com/llvm/llvm-project/)
 - 安装 worker-build：`cargo install worker-build`
 
 ### 1. 创建 D1 数据库
@@ -86,18 +88,10 @@ wrangler deploy
 - 2FA：`GET /api/two-factor`、`/api/two-factor/authenticator/*`
 - 官方安卓设备探测：`GET /api/devices/knowndevice`
 - icon支持: `GET /icons/{*res}`
+- 域名规则支持: `GET /api/settings/domains`
 
-## 增强项
+## 🔐安全增强
 - 登录校验，防止失效tocken成功登录
-
-## 本地开发
-
-```bash
-wrangler d1 execute vault1 --local --file=sql/schema_full.sql
-wrangler dev
-```
-
-本地可用 `.dev.vars`（Wrangler 支持）注入 secrets。
 
 ## 许可证
 

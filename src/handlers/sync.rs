@@ -6,6 +6,7 @@ use worker::Env;
 use crate::{
     auth::Claims,
     db,
+    domains,
     error::AppError,
     models::{
         cipher::{Cipher, CipherDBModel},
@@ -103,7 +104,7 @@ pub async fn get_sync_data(
         folders,
         ciphers,
         sends,
-        domains: serde_json::Value::Null, // Ignored for basic implementation
+        domains: domains::build_domains_object(&db, &user_id, true).await?,
         object: "sync".to_string(),
     };
 

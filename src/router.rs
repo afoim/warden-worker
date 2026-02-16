@@ -7,7 +7,7 @@ use axum::extract::DefaultBodyLimit;
 use std::sync::Arc;
 use worker::Env;
 
-use crate::handlers::{accounts, ciphers, config, identity, sync, folders, import, two_factor, devices, sends, usage, icons};
+use crate::handlers::{accounts, ciphers, config, identity, sync, folders, import, two_factor, devices, sends, usage, icons, settings};
 
 pub fn api_router(env: Env) -> Router {
     let app_state = Arc::new(env);
@@ -107,6 +107,12 @@ pub fn api_router(env: Env) -> Router {
         .route("/api/folders", post(folders::create_folder))
         .route("/api/folders/{id}", put(folders::update_folder))
         .route("/api/folders/{id}", delete(folders::delete_folder))
+        .route(
+            "/api/settings/domains",
+            get(settings::get_domains)
+                .post(settings::post_domains)
+                .put(settings::put_domains),
+        )
         .route("/api/config", get(config::config))
         .route("/api/alive", get(config::alive))
         .route("/api/now", get(config::now))
