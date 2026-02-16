@@ -85,12 +85,15 @@ pub async fn get_sync_data(
         private_key: user.private_key,
     };
 
-    let response = SyncResponse {
-        profile,
-        folders,
-        ciphers,
-        domains: serde_json::Value::Null, // Ignored for basic implementation
-        object: "sync".to_string(),
+    let response = SyncResponse {  
+        profile,  
+        folders,  
+        ciphers,  
+        collections: Vec::new(),  
+        policies: Vec::new(),  
+        sends: Vec::new(),  
+        domains: serde_json::Value::Null,  
+        object: "sync".to_string(),  
     };
 
     Ok(Json(response))

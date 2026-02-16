@@ -9,9 +9,8 @@
   "d1_databases": [
     {
       "binding": "vault1",
-      "database_id": "91d6795d-e822-4ca9-aa15-b327765bf3a9"
-      // database_name 可选，但建议写上以增强可读性
-      // "database_name": "vault1"
+      "database_name": "warden-sql",
+      "database_id": "80d8a11e-1b69-407a-ad7e-564141cc4e92"
     }
   ],
 
