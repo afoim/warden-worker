@@ -44,6 +44,12 @@ pub struct ChangeEmailRequest {
     pub kdf_iterations: Option<i32>,
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProfileData {
+    pub name: Option<String>,
+}
+
 #[worker::send]
 pub async fn profile(
     claims: Claims,
@@ -77,6 +83,36 @@ pub async fn profile(
         "organizations": [],
         "object": "profile"
     })))
+}
+
+#[worker::send]
+pub async fn post_profile(
+    claims: Claims,
+    State(env): State<Arc<Env>>,
+    Json(payload): Json<ProfileData>,
+) -> Result<Json<Value>, AppError> {
+    let name = payload.name.unwrap_or_default();
+
+    if name.len() > 50 {
+        return Err(AppError::BadRequest(
+            "The field Name must be a string with a maximum length of 50.".to_string(),
+        ));
+    }
+
+    let db = db::get_db(&env)?;
+    let now = Utc::now().to_rfc3339();
+
+    db.prepare("UPDATE users SET name = ?1, updated_at = ?2 WHERE id = ?3")
+        .bind(&[
+            name.into(),
+            now.into(),
+            claims.sub.clone().into(),
+        ])?
+        .run()
+        .await
+        .map_err(|_| AppError::Database)?;
+
+    profile(claims, State(env)).await
 }
 
 #[worker::send]

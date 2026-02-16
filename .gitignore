@@ -1,6 +1,6 @@
 target
 node_modules
 .wrangler
-vaultwarden-main
+vaultwarden
 keyguard-app-master
 log
