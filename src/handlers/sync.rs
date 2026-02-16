@@ -12,7 +12,7 @@ use crate::{
         cipher::{Cipher, CipherDBModel},
         folder::{Folder, FolderResponse},
         send::{send_to_json, SendDBModel},
-        sync::{Profile, SyncResponse},
+        sync::{Profile, SyncResponse, UserDecryption},
         user::User,
     },
     two_factor,
@@ -81,10 +81,13 @@ pub async fn get_sync_data(
     let time = chrono::DateTime::parse_from_rfc3339(&user.created_at)
         .map_err(|_| AppError::Internal)?
         .to_rfc3339_opts(chrono::SecondsFormat::Micros, true);
+    let user_key = user.key.clone();
+    let user_email = user.email.clone();
     let profile = Profile {
         id: user.id,
         name: user.name,
-        email: user.email,
+        email: user_email.clone(),
+        avatar_color: user.avatar_color,
         master_password_hint: user.master_password_hint,
         security_stamp: user.security_stamp,
         object: "profile".to_string(),
@@ -95,8 +98,22 @@ pub async fn get_sync_data(
         two_factor_enabled: two_factor::is_authenticator_enabled(&db, &user_id).await?,
         uses_key_connector: false,
         creation_date: time,
-        key: user.key,
+        key: user_key.clone(),
         private_key: user.private_key,
+    };
+
+    let user_decryption = UserDecryption {
+        master_password_unlock: serde_json::json!({
+            "kdf": {
+                "kdfType": user.kdf_type,
+                "iterations": user.kdf_iterations,
+                "memory": null,
+                "parallelism": null
+            },
+            "masterKeyEncryptedUserKey": user_key,
+            "masterKeyWrappedUserKey": user_key,
+            "salt": user_email
+        }),
     };
 
     let response = SyncResponse {
@@ -105,6 +122,7 @@ pub async fn get_sync_data(
         ciphers,
         sends,
         domains: domains::build_domains_object(&db, &user_id, true).await?,
+        user_decryption,
         object: "sync".to_string(),
     };
 

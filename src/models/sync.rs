@@ -3,10 +3,18 @@ use serde::Serialize;
 use serde_json::Value;
 
 #[derive(Debug, Serialize)]
+pub struct UserDecryption {
+    #[serde(rename = "masterPasswordUnlock")]
+    pub master_password_unlock: Value,
+}
+
+#[derive(Debug, Serialize)]
 pub struct Profile {
     pub name: Option<String>,
     pub email: String,
     pub id: String,
+    #[serde(rename = "avatarColor")]
+    pub avatar_color: Option<String>,
     #[serde(rename = "masterPasswordHint")]
     pub master_password_hint: Option<String>,
     #[serde(rename = "securityStamp")]
@@ -43,6 +51,8 @@ pub struct SyncResponse {
     pub sends: Vec<Value>,
     #[serde(rename = "Domains")]
     pub domains: Value,
+    #[serde(rename = "userDecryption")]
+    pub user_decryption: UserDecryption,
     #[serde(rename = "Object")]
     pub object: String,
 }
