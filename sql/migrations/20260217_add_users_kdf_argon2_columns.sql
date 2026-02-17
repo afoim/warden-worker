@@ -1,0 +1,2 @@
+ALTER TABLE users ADD COLUMN kdf_memory INTEGER;
+ALTER TABLE users ADD COLUMN kdf_parallelism INTEGER;

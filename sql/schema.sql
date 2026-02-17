@@ -25,6 +25,8 @@ CREATE TABLE IF NOT EXISTS users (
     public_key TEXT NOT NULL,
     kdf_type INTEGER NOT NULL DEFAULT 0,
     kdf_iterations INTEGER NOT NULL DEFAULT 600000,
+    kdf_memory INTEGER,
+    kdf_parallelism INTEGER,
     security_stamp TEXT,
     equivalent_domains TEXT NOT NULL DEFAULT '[]',
     excluded_globals TEXT NOT NULL DEFAULT '[]',

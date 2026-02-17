@@ -19,6 +19,41 @@ use crate::{
     two_factor,
 };
 
+const KDF_TYPE_PBKDF2: i32 = 0;
+const KDF_TYPE_ARGON2ID: i32 = 1;
+const ARGON2ID_MEMORY_DEFAULT_MB: i32 = 64;
+const ARGON2ID_PARALLELISM_DEFAULT: i32 = 4;
+
+fn normalize_kdf_for_response(
+    kdf_type: i32,
+    kdf_iterations: i32,
+    kdf_memory: Option<i32>,
+    kdf_parallelism: Option<i32>,
+) -> (Option<i32>, Option<i32>) {
+    match kdf_type {
+        KDF_TYPE_PBKDF2 => (None, None),
+        KDF_TYPE_ARGON2ID => {
+            if kdf_iterations < 1 {
+                return (Some(ARGON2ID_MEMORY_DEFAULT_MB), Some(ARGON2ID_PARALLELISM_DEFAULT));
+            }
+            let mem = kdf_memory.unwrap_or(ARGON2ID_MEMORY_DEFAULT_MB);
+            let par = kdf_parallelism.unwrap_or(ARGON2ID_PARALLELISM_DEFAULT);
+            let mem = if (15..=1024).contains(&mem) {
+                mem
+            } else {
+                ARGON2ID_MEMORY_DEFAULT_MB
+            };
+            let par = if (1..=16).contains(&par) {
+                par
+            } else {
+                ARGON2ID_PARALLELISM_DEFAULT
+            };
+            (Some(mem), Some(par))
+        }
+        _ => (None, None),
+    }
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SyncQuery {
@@ -91,6 +126,12 @@ pub async fn get_sync_data(
         .to_rfc3339_opts(chrono::SecondsFormat::Micros, true);
     let user_key = user.key.clone();
     let user_email = user.email.clone();
+    let (kdf_memory, kdf_parallelism) = normalize_kdf_for_response(
+        user.kdf_type,
+        user.kdf_iterations,
+        user.kdf_memory,
+        user.kdf_parallelism,
+    );
     let profile = Profile {
         id: user.id,
         name: user.name.unwrap_or_default(),
@@ -119,8 +160,8 @@ pub async fn get_sync_data(
             "kdf": {
                 "kdfType": user.kdf_type,
                 "iterations": user.kdf_iterations,
-                "memory": null,
-                "parallelism": null
+                "memory": kdf_memory,
+                "parallelism": kdf_parallelism
             },
             "masterKeyEncryptedUserKey": user_key,
             "masterKeyWrappedUserKey": user_key,

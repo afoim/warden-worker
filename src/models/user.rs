@@ -15,6 +15,8 @@ pub struct User {
     pub public_key: String,
     pub kdf_type: i32,
     pub kdf_iterations: i32,
+    pub kdf_memory: Option<i32>,
+    pub kdf_parallelism: Option<i32>,
     pub security_stamp: String,
     pub created_at: String,
     pub updated_at: String,
@@ -69,6 +71,10 @@ pub struct RegisterRequest {
     pub user_asymmetric_keys: KeyData,
     pub kdf: i32,
     pub kdf_iterations: i32,
+    #[serde(default)]
+    pub kdf_memory: Option<i32>,
+    #[serde(default)]
+    pub kdf_parallelism: Option<i32>,
 }
 
 #[derive(Debug, Deserialize)]

@@ -93,6 +93,41 @@ fn js_opt_i64(v: Option<i64>) -> JsValue {
     }
 }
 
+const KDF_TYPE_PBKDF2: i32 = 0;
+const KDF_TYPE_ARGON2ID: i32 = 1;
+const ARGON2ID_MEMORY_DEFAULT_MB: i32 = 64;
+const ARGON2ID_PARALLELISM_DEFAULT: i32 = 4;
+
+fn normalize_kdf_for_response(
+    kdf_type: i32,
+    kdf_iterations: i32,
+    kdf_memory: Option<i32>,
+    kdf_parallelism: Option<i32>,
+) -> (Option<i32>, Option<i32>) {
+    match kdf_type {
+        KDF_TYPE_PBKDF2 => (None, None),
+        KDF_TYPE_ARGON2ID => {
+            if kdf_iterations < 1 {
+                return (Some(ARGON2ID_MEMORY_DEFAULT_MB), Some(ARGON2ID_PARALLELISM_DEFAULT));
+            }
+            let mem = kdf_memory.unwrap_or(ARGON2ID_MEMORY_DEFAULT_MB);
+            let par = kdf_parallelism.unwrap_or(ARGON2ID_PARALLELISM_DEFAULT);
+            let mem = if (15..=1024).contains(&mem) {
+                mem
+            } else {
+                ARGON2ID_MEMORY_DEFAULT_MB
+            };
+            let par = if (1..=16).contains(&par) {
+                par
+            } else {
+                ARGON2ID_PARALLELISM_DEFAULT
+            };
+            (Some(mem), Some(par))
+        }
+        _ => (None, None),
+    }
+}
+
 fn generate_tokens_and_response(
     user: User,
     env: &Arc<Env>,
@@ -140,12 +175,19 @@ fn generate_tokens_and_response(
         &EncodingKey::from_secret(jwt_refresh_secret.as_ref()),
     )?;
 
+    let (kdf_memory, kdf_parallelism) = normalize_kdf_for_response(
+        user.kdf_type,
+        user.kdf_iterations,
+        user.kdf_memory,
+        user.kdf_parallelism,
+    );
+
     Ok(json!({
         "ForcePasswordReset": false,
         "Kdf": user.kdf_type,
         "KdfIterations": user.kdf_iterations,
-        "KdfMemory": null,
-        "KdfParallelism": null,
+        "KdfMemory": kdf_memory,
+        "KdfParallelism": kdf_parallelism,
         "Key": user.key,
         "MasterPasswordPolicy": { "Object": "masterPasswordPolicy" },
         "PrivateKey": user.private_key,
@@ -156,8 +198,8 @@ fn generate_tokens_and_response(
                 "Kdf": {
                     "KdfType": user.kdf_type,
                     "Iterations": user.kdf_iterations,
-                    "Memory": null,
-                    "Parallelism": null
+                    "Memory": kdf_memory,
+                    "Parallelism": kdf_parallelism
                 },
                 "MasterKeyEncryptedUserKey": user.key,
                 "MasterKeyWrappedUserKey": user.key,
