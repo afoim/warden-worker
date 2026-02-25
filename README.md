@@ -92,3 +92,7 @@ wrangler dev
 ## 许可证
 
 MIT
+
+## Star History
+
+[![Star History Chart](https://api.star-history.com/svg?repos=afoim/warden-worker&type=date&legend=top-left)](https://www.star-history.com/#afoim/warden-worker&type=date&legend=top-left)
