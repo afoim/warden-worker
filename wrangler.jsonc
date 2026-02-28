@@ -9,8 +9,7 @@
   "d1_databases": [
     {
       "binding": "vault1",
-      "database_name": "warden-sql",
-      "database_id": "80d8a11e-1b69-407a-ad7e-564141cc4e92"
+      "database_id": "897b6fd9-e611-437e-9c7f-703d3674ea1f"
     }
   ],
 
