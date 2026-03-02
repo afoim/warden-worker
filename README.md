@@ -1,3 +1,7 @@
+# 无力维护，建议使用其他的fork，比如： https://github.com/qaz741wsd856/warden-worker
+
+---
+
 # Warden Worker
 
 # 有问题？尝试 [![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/afoim/warden-worker)
