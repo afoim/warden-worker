@@ -9,3 +9,4 @@ pub mod two_factor;
 pub mod devices;
 pub mod sends;
 pub mod usage;
+pub mod icons;
