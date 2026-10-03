@@ -4,3 +4,8 @@ node_modules
 vaultwarden-main
 keyguard-app-master
 log
+# Captured traffic may contain vaults, login hashes, and session tokens.
+bwand.xml
+bitwarden_and.xml
+*.har
+*.burp
